@@ -1,15 +1,13 @@
-"""Pump Impeller Quality Inspector - Interactive QC Demo.
+"""Pump Impeller Quality Inspector - Streamlit Web Application.
 
 Sequential Two-Stage Machine Vision Pipeline:
 1. Input Checker Gatekeeper (tau = 0.0049)
 2. Defect Inspection Classifier (Pass < 0.50, Hold >= 0.76)
-With Gemini QA Summary integration.
+With Gemini QA Summary integration & dual-model fallback.
 
-Usage:
-    .\\.venv\\Scripts\\python.exe app.py [--port 8080] [--host 127.0.0.1]
+Run command:
+    streamlit run app.py
 """
-import argparse
-import base64
 import io
 import json
 import os
@@ -19,776 +17,305 @@ import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from zipfile import ZipFile
 
 from PIL import Image
+import streamlit as st
 from pipeline import ImpellerQCPipeline
 
-# Global pipeline and preloaded samples
-pipeline = None
-samples = {}
-
-HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pump Impeller Quality Inspector</title>
-  <style>
-    :root {
-      --bg-page: #f1f5f9;
-      --bg-card: #ffffff;
-      --border-card: #e2e8f0;
-      --text-black: #000000;
-      --text-muted: #475569;
-      --teal-primary: #0d9488;
-      --teal-hover: #0f766e;
-      --teal-light: #ccfbf1;
-      --color-pass: #16a34a;
-      --bg-pass: #dcfce7;
-      --color-review: #d97706;
-      --bg-review: #fef3c7;
-      --color-hold: #dc2626;
-      --bg-hold: #fee2e2;
-      --color-blocked: #64748b;
-      --bg-blocked: #f1f5f9;
-    }
-
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      font-size: 16px;
-      color: var(--text-black);
-      background-color: var(--bg-page);
-      line-height: 1.5;
-      padding: 32px 20px;
-      min-height: 100vh;
-    }
-
-    .wrapper {
-      max-width: 1100px;
-      margin: 0 auto;
-    }
-
-    header {
-      margin-bottom: 28px;
-    }
-
-    h1 {
-      font-size: 32px;
-      font-weight: 700;
-      color: var(--text-black);
-      letter-spacing: -0.02em;
-      margin-bottom: 6px;
-    }
-
-    p.main-instruction {
-      font-size: 16px;
-      color: var(--text-muted);
-      font-weight: 500;
-    }
-
-    /* Layout grid: left upload, right result */
-    .layout-grid {
-      display: grid;
-      grid-template-columns: 440px 1fr;
-      gap: 24px;
-      align-items: start;
-    }
-
-    @media (max-width: 860px) {
-      .layout-grid {
-        grid-template-columns: 1fr;
-      }
-      h1 {
-        font-size: 26px;
-      }
-    }
-
-    .card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-      padding: 24px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-    }
-
-    h2 {
-      font-size: 20px;
-      font-weight: 700;
-      color: var(--text-black);
-      margin-bottom: 16px;
-    }
-
-    /* Upload Dropzone */
-    .dropzone {
-      border: 2px dashed #cbd5e1;
-      border-radius: 8px;
-      padding: 24px 16px;
-      text-align: center;
-      cursor: pointer;
-      background: #fafafa;
-      transition: all 0.2s ease;
-    }
-    .dropzone:hover, .dropzone.dragover {
-      border-color: var(--teal-primary);
-      background: #f0fdfa;
-    }
-    .dropzone-icon {
-      font-size: 28px;
-      margin-bottom: 6px;
-      color: var(--teal-primary);
-    }
-    .dropzone-label {
-      font-size: 16px;
-      font-weight: 600;
-      color: var(--text-black);
-      margin-bottom: 4px;
-    }
-    .dropzone-sub {
-      font-size: 14px;
-      color: var(--text-muted);
-    }
-    #file-input { display: none; }
-
-    /* Compact Image Preview */
-    .preview-wrapper {
-      margin-top: 16px;
-    }
-    .preview-box {
-      border: 1px solid var(--border-card);
-      border-radius: 8px;
-      background: #f8fafc;
-      overflow: hidden;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: height 0.2s ease;
-    }
-    .preview-box.compact {
-      height: 48px;
-    }
-    .preview-box.loaded {
-      height: auto;
-      max-height: 320px;
-      padding: 8px;
-    }
-    .preview-box img {
-      max-width: 100%;
-      max-height: 300px;
-      object-fit: contain;
-      border-radius: 4px;
-    }
-    .preview-empty-text {
-      font-size: 14px;
-      color: var(--text-muted);
-    }
-
-    /* Try a sample section */
-    .sample-section {
-      margin-top: 24px;
-      border-top: 1px solid var(--border-card);
-      padding-top: 20px;
-    }
-    .sample-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-    .sample-btn {
-      background: #ffffff;
-      border: 1px solid var(--border-card);
-      padding: 10px 12px;
-      border-radius: 8px;
-      cursor: pointer;
-      text-align: left;
-      font-family: inherit;
-      color: var(--text-black);
-      transition: all 0.15s ease;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-    .sample-btn:hover {
-      border-color: var(--teal-primary);
-      background: #f0fdfa;
-      transform: translateY(-1px);
-    }
-    .sample-btn .title {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text-black);
-    }
-    .sample-btn .sub {
-      font-size: 12px;
-      color: var(--text-muted);
-    }
-
-    /* Results Column (Right) */
-    .result-container {
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-    }
-
-    /* Most Prominent Result Banner */
-    .result-banner {
-      border-radius: 12px;
-      padding: 24px;
-      border: 2px solid var(--border-card);
-      background: #ffffff;
-      transition: all 0.2s ease;
-    }
-
-    .result-tag-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 8px;
-    }
-    .status-badge {
-      display: inline-block;
-      font-size: 13px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      padding: 4px 10px;
-      border-radius: 999px;
-    }
-    .badge-pass { background: var(--bg-pass); color: var(--color-pass); border: 1px solid var(--color-pass); }
-    .badge-review { background: var(--bg-review); color: var(--color-review); border: 1px solid var(--color-review); }
-    .badge-hold { background: var(--bg-hold); color: var(--color-hold); border: 1px solid var(--color-hold); }
-    .badge-blocked { background: var(--bg-blocked); color: var(--color-blocked); border: 1px solid var(--color-blocked); }
-    .badge-idle { background: #f1f5f9; color: var(--text-muted); border: 1px solid #cbd5e1; }
-
-    .result-title {
-      font-size: 26px;
-      font-weight: 800;
-      color: var(--text-black);
-      margin-bottom: 10px;
-      line-height: 1.2;
-    }
-
-    .next-action-box {
-      margin-top: 12px;
-      padding: 12px 14px;
-      border-radius: 8px;
-      font-size: 15px;
-      font-weight: 600;
-      line-height: 1.4;
-    }
-    .action-pass { background: var(--bg-pass); color: #14532d; border-left: 4px solid var(--color-pass); }
-    .action-review { background: var(--bg-review); color: #78350f; border-left: 4px solid var(--color-review); }
-    .action-hold { background: var(--bg-hold); color: #7f1d1d; border-left: 4px solid var(--color-hold); }
-    .action-blocked { background: var(--bg-blocked); color: #334155; border-left: 4px solid var(--color-blocked); }
-
-    .result-desc {
-      font-size: 15px;
-      color: var(--text-black);
-      margin-top: 8px;
-      line-height: 1.45;
-    }
-
-    /* Collapsed Inspection Details */
-    details.inspection-details {
-      margin-top: 16px;
-      border-top: 1px solid var(--border-card);
-      padding-top: 14px;
-    }
-    details.inspection-details summary {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--teal-primary);
-      cursor: pointer;
-      user-select: none;
-    }
-    details.inspection-details summary:hover {
-      text-decoration: underline;
-    }
-    .details-content {
-      margin-top: 12px;
-      padding: 14px;
-      background: #f8fafc;
-      border-radius: 8px;
-      border: 1px solid var(--border-card);
-      font-size: 14px;
-      line-height: 1.6;
-    }
-    .detail-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 4px 0;
-      border-bottom: 1px solid #edf2f7;
-    }
-    .detail-row:last-child { border-bottom: none; }
-    .detail-label { color: var(--text-muted); }
-    .detail-val { font-weight: 600; color: var(--text-black); font-family: monospace; }
-
-    /* Gemini QA Summary Section */
-    .gemini-section {
-      margin-top: 20px;
-      padding: 20px;
-      background: #ffffff;
-      border: 1px solid var(--border-card);
-      border-radius: 12px;
-    }
-    .btn-teal {
-      background-color: var(--teal-primary);
-      color: #ffffff;
-      border: none;
-      padding: 10px 18px;
-      border-radius: 8px;
-      font-family: inherit;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.15s ease;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .btn-teal:hover {
-      background-color: var(--teal-hover);
-    }
-    .btn-teal:disabled {
-      background-color: #94a3b8;
-      cursor: not-allowed;
-    }
-
-    .qa-box {
-      margin-top: 14px;
-      padding: 16px;
-      border-radius: 8px;
-      font-size: 15px;
-      color: var(--text-black);
-      line-height: 1.5;
-      background: #f8fafc;
-      border: 1px solid #cbd5e1;
-    }
-    .qa-box.gemini {
-      background: #f0fdfa;
-      border: 1px solid #99f6e4;
-      color: var(--text-black);
-    }
-    .qa-box.local {
-      background: #f8fafc;
-      border: 1px solid #cbd5e1;
-      color: var(--text-black);
-    }
-    .qa-box.error {
-      background: #fff1f2;
-      border-color: #fecdd3;
-      color: #9f1239;
-    }
-    .qa-badge {
-      display: inline-block;
-      font-size: 12px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      padding: 3px 8px;
-      border-radius: 4px;
-      margin-bottom: 8px;
-    }
-    .qa-badge.qa-badge-gemini {
-      background: #ccfbf1;
-      color: #0f766e;
-    }
-    .qa-badge.qa-badge-local {
-      background: #e2e8f0;
-      color: #334155;
-    }
-    .qa-badge.qa-badge-error {
-      background: #ffe4e6;
-      color: #9f1239;
-    }
-    .qa-title {
-      font-size: 13px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--teal-primary);
-      margin-bottom: 4px;
-    }
-
-    .spinner {
-      display: inline-block;
-      width: 14px;
-      height: 14px;
-      border: 2px solid rgba(255,255,255,0.4);
-      border-radius: 50%;
-      border-top-color: #ffffff;
-      animation: spin 0.8s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-  </style>
-</head>
-<body>
-  <div class="wrapper">
-    <header>
-      <h1>Pump Impeller Quality Inspector</h1>
-      <p class="main-instruction">Upload a top-view photo of a pump impeller</p>
-    </header>
-
-    <div class="layout-grid">
-      <!-- Left Column: Upload & Sample Controls -->
-      <div class="card">
-        <h2>Inspection Input</h2>
-
-        <div class="dropzone" id="dropzone" onclick="document.getElementById('file-input').click()">
-          <div class="dropzone-icon">&uarr;</div>
-          <div class="dropzone-label">Click or drag an image here</div>
-          <div class="dropzone-sub">Supports JPEG or PNG format</div>
-        </div>
-        <input type="file" id="file-input" accept="image/*" onchange="handleFileUpload(this.files[0])">
-
-        <div class="preview-wrapper">
-          <div class="preview-box compact" id="preview-box">
-            <span class="preview-empty-text" id="preview-placeholder">No image selected</span>
-            <img id="image-preview" src="" alt="Selected Impeller" style="display: none;">
-          </div>
-        </div>
-
-        <div class="sample-section">
-          <h2>Try a sample</h2>
-          <div class="sample-grid">
-            <button class="sample-btn" onclick="runSample('sample_unsupported')">
-              <span class="title">🚫 Unsupported part</span>
-              <span class="sub">Pump housing casing</span>
-            </button>
-            <button class="sample-btn" onclick="runSample('sample_pass')">
-              <span class="title">✅ Pass Candidate</span>
-              <span class="sub">Normal release procedure</span>
-            </button>
-            <button class="sample-btn" onclick="runSample('sample_review')">
-              <span class="title">⚠️ Manual Review</span>
-              <span class="sub">Station visual inspection</span>
-            </button>
-            <button class="sample-btn" onclick="runSample('sample_hold')">
-              <span class="title">🛑 Hold</span>
-              <span class="sub">Supervisor review</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Right Column: Result and Next Action -->
-      <div class="result-container">
-        <!-- Most Prominent Result Banner -->
-        <div class="card result-banner" id="result-banner">
-          <div class="result-tag-row">
-            <span class="status-badge badge-idle" id="status-badge">Awaiting Input</span>
-            <span id="analyzing-spinner" style="display: none; font-size: 14px; color: var(--teal-primary);">
-              <span class="spinner" style="border-top-color: var(--teal-primary);"></span> Analyzing...
-            </span>
-          </div>
-
-          <div class="result-title" id="result-title">No Part Inspected</div>
-          <div class="result-desc" id="result-desc">Upload a photo on the left or select a sample from "Try a sample" to begin inspection.</div>
-
-          <div class="next-action-box action-blocked" id="next-action-box" style="display: none;">
-            <strong>Prescribed Next Action:</strong> <span id="next-action-text">&mdash;</span>
-          </div>
-
-          <!-- Collapsed Inspection Details -->
-          <details class="inspection-details" id="inspection-details" style="display: none;">
-            <summary>Inspection details</summary>
-            <div class="details-content">
-              <div class="detail-row">
-                <span class="detail-label">Gatekeeper Status:</span>
-                <span class="detail-val" id="det-gate-status">&mdash;</span>
-              </div>
-              <div class="detail-row">
-                <span class="detail-label">Supported Probability P(Supported):</span>
-                <span class="detail-val" id="det-supp-prob">&mdash;</span>
-              </div>
-              <div class="detail-row">
-                <span class="detail-label">Gatekeeper Threshold (&tau;):</span>
-                <span class="detail-val" id="det-gate-thresh">0.0049</span>
-              </div>
-              <div class="detail-row" id="det-defect-row" style="display: none;">
-                <span class="detail-label">Defect Probability P(Defective):</span>
-                <span class="detail-val" id="det-def-prob">&mdash;</span>
-              </div>
-              <div class="detail-row" id="det-pass-row" style="display: none;">
-                <span class="detail-label">Pass Threshold:</span>
-                <span class="detail-val" id="det-pass-thresh">0.50</span>
-              </div>
-              <div class="detail-row" id="det-hold-row" style="display: none;">
-                <span class="detail-label">Hold Threshold:</span>
-                <span class="detail-val" id="det-hold-thresh">0.76</span>
-              </div>
-            </div>
-          </details>
-        </div>
-
-        <!-- Gemini QA Summary Section (Visible only after accepted inspection) -->
-        <div class="gemini-section" id="gemini-card" style="display: none;">
-          <h2>AI QA Summary</h2>
-          <p style="font-size: 15px; color: var(--text-muted); margin-bottom: 12px;">
-            Generate an operator-facing summary synthesized by Gemini based on the verified QC decision and model scores.
-          </p>
-
-          <button class="btn-teal" id="qa-btn" onclick="generateQASummary()">
-            <span>Generate QA Summary</span>
-          </button>
-
-          <div class="qa-box" id="qa-result-box" style="display: none;">
-            <div class="qa-badge" id="qa-badge">QA Summary</div>
-            <div id="qa-summary-text"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    let currentInspection = null;
-
-    // Drag and drop handlers
-    const dropzone = document.getElementById('dropzone');
-    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
-    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
-    dropzone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      dropzone.classList.remove('dragover');
-      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-        handleFileUpload(e.dataTransfer.files[0]);
-      }
-    });
-
-    function setPreview(src) {
-      const box = document.getElementById('preview-box');
-      const img = document.getElementById('image-preview');
-      const placeholder = document.getElementById('preview-placeholder');
-
-      if (src) {
-        img.src = src;
-        img.style.display = 'block';
-        placeholder.style.display = 'none';
-        box.className = 'preview-box loaded';
-      } else {
-        img.src = '';
-        img.style.display = 'none';
-        placeholder.style.display = 'block';
-        box.className = 'preview-box compact';
-      }
-    }
-
-    function clearOldState() {
-      // Clear Gemini summary when user picks a new image
-      document.getElementById('gemini-card').style.display = 'none';
-      const box = document.getElementById('qa-result-box');
-      box.style.display = 'none';
-      box.className = 'qa-box';
-      const badge = document.getElementById('qa-badge');
-      if (badge) {
-        badge.className = 'qa-badge';
-        badge.innerText = 'QA Summary';
-      }
-      document.getElementById('qa-summary-text').innerText = '';
-      currentInspection = null;
-    }
-
-    async function runSample(sampleId) {
-      clearOldState();
-      document.getElementById('analyzing-spinner').style.display = 'inline-flex';
-      setPreview('/samples/' + sampleId);
-
-      try {
-        const response = await fetch('/api/inspect', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sample_id: sampleId })
-        });
-        const result = await response.json();
-        currentInspection = result;
-        renderResults(result);
-      } catch (err) {
-        alert('Inspection request failed: ' + err.message);
-      } finally {
-        document.getElementById('analyzing-spinner').style.display = 'none';
-      }
-    }
-
-    async function handleFileUpload(file) {
-      if (!file) return;
-      clearOldState();
-      document.getElementById('analyzing-spinner').style.display = 'inline-flex';
-
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const dataUrl = e.target.result;
-        setPreview(dataUrl);
-
-        try {
-          const response = await fetch('/api/inspect', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              image_base64: dataUrl.split(',')[1],
-              filename: file.name
-            })
-          });
-          const result = await response.json();
-          currentInspection = result;
-          renderResults(result);
-        } catch (err) {
-          alert('Upload failed: ' + err.message);
-        } finally {
-          document.getElementById('analyzing-spinner').style.display = 'none';
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-
-    function renderResults(res) {
-      const banner = document.getElementById('result-banner');
-      const badge = document.getElementById('status-badge');
-      const title = document.getElementById('result-title');
-      const desc = document.getElementById('result-desc');
-      const actionBox = document.getElementById('next-action-box');
-      const actionText = document.getElementById('next-action-text');
-
-      const details = document.getElementById('inspection-details');
-      const detGateStatus = document.getElementById('det-gate-status');
-      const detSuppProb = document.getElementById('det-supp-prob');
-      const detDefectRow = document.getElementById('det-defect-row');
-      const detDefProb = document.getElementById('det-def-prob');
-      const detPassRow = document.getElementById('det-pass-row');
-      const detHoldRow = document.getElementById('det-hold-row');
-
-      const geminiCard = document.getElementById('gemini-card');
-
-      details.style.display = 'block';
-      details.open = false; // Always keep collapsed by default
-
-      const gate = res.gatekeeper;
-      const defect = res.defect_detector;
-      const pSupp = gate.supported_probability;
-
-      detGateStatus.innerText = gate.accepted ? 'Accepted (Supported Impeller)' : 'Blocked (Unsupported Part)';
-      detSuppProb.innerText = pSupp.toFixed(4);
-
-      if (!gate.accepted) {
-        // Outcome: Unsupported Image
-        badge.className = 'status-badge badge-blocked';
-        badge.innerText = 'Unsupported Image';
-        title.innerText = 'Unsupported Image';
-        desc.innerText = gate.message;
-
-        actionBox.style.display = 'block';
-        actionBox.className = 'next-action-box action-blocked';
-        actionText.innerText = 'Upload a top-view photo of a pump impeller';
-
-        detDefectRow.style.display = 'none';
-        detPassRow.style.display = 'none';
-        detHoldRow.style.display = 'none';
-
-        // Do not show Gemini QA button for blocked parts
-        geminiCard.style.display = 'none';
-      } else {
-        // Gatekeeper Accepted -> Show defect results
-        detDefectRow.style.display = 'flex';
-        detPassRow.style.display = 'flex';
-        detHoldRow.style.display = 'flex';
-        detDefProb.innerText = defect.defective_probability.toFixed(4);
-
-        actionBox.style.display = 'block';
-        actionText.innerText = res.next_action;
-
-        if (res.final_action === 'PASS') {
-          badge.className = 'status-badge badge-pass';
-          badge.innerText = 'Pass Candidate';
-          title.innerText = 'Pass Candidate';
-          actionBox.className = 'next-action-box action-pass';
-        } else if (res.final_action === 'MANUAL_REVIEW') {
-          badge.className = 'status-badge badge-review';
-          badge.innerText = 'Manual Review';
-          title.innerText = 'Manual Review';
-          actionBox.className = 'next-action-box action-review';
-        } else {
-          badge.className = 'status-badge badge-hold';
-          badge.innerText = 'Hold';
-          title.innerText = 'Hold';
-          actionBox.className = 'next-action-box action-hold';
-        }
-
-        desc.innerText = res.message;
-
-        // Show Gemini QA Summary button after accepted inspection
-        geminiCard.style.display = 'block';
-      }
-    }
-
-    async function generateQASummary() {
-      if (!currentInspection) return;
-
-      const btn = document.getElementById('qa-btn');
-      const box = document.getElementById('qa-result-box');
-      const badge = document.getElementById('qa-badge');
-      const summaryText = document.getElementById('qa-summary-text');
-
-      btn.disabled = true;
-      btn.innerHTML = '<span class="spinner"></span> Generating QA Summary...';
-
-      try {
-        const response = await fetch('/api/qa-summary', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action_label: currentInspection.action_label,
-            final_action: currentInspection.final_action,
-            next_action: currentInspection.next_action,
-            supported_probability: currentInspection.gatekeeper.supported_probability,
-            defective_probability: currentInspection.defect_detector ? currentInspection.defect_detector.defective_probability : null,
-            gate_threshold: currentInspection.gatekeeper.threshold,
-            pass_threshold: currentInspection.defect_detector ? currentInspection.defect_detector.pass_threshold : 0.50,
-            hold_threshold: currentInspection.defect_detector ? currentInspection.defect_detector.hold_threshold : 0.76
-          })
-        });
-
-        const data = await response.json();
-        box.style.display = 'block';
-
-        if (data.source === 'local' || data.is_local) {
-          box.className = 'qa-box local';
-          badge.className = 'qa-badge qa-badge-local';
-          badge.innerText = 'Local summary';
-          summaryText.innerText = data.summary;
-        } else if (data.success && data.source === 'gemini') {
-          box.className = 'qa-box gemini';
-          badge.className = 'qa-badge qa-badge-gemini';
-          const modelBadge = data.fallback_used
-            ? `Gemini (${data.model_used} • Fallback)`
-            : `Gemini (${data.model_used})`;
-          badge.innerText = modelBadge;
-          summaryText.innerText = data.summary;
-        } else {
-          box.className = 'qa-box error';
-          badge.className = 'qa-badge qa-badge-error';
-          badge.innerText = 'Error';
-          summaryText.innerText = data.error || 'QA summary could not be generated.';
-        }
-      } catch (err) {
-        box.style.display = 'block';
-        box.className = 'qa-box error';
-        badge.className = 'qa-badge qa-badge-error';
-        badge.innerText = 'Request Failed';
-        summaryText.innerText = 'QA summary request failed: ' + err.message;
-      } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<span>Generate QA Summary</span>';
-      }
-    }
-  </script>
-</body>
-</html>
+# ---------------------------------------------------------------------------
+# Page Configuration & Theming
+# ---------------------------------------------------------------------------
+st.set_page_config(
+    page_title="Pump Impeller Quality Inspector",
+    page_icon="⚙️",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+CUSTOM_CSS = """
+<style>
+  :root {
+    --bg-page: #f1f5f9;
+    --bg-card: #ffffff;
+    --border-card: #e2e8f0;
+    --text-black: #000000;
+    --text-muted: #475569;
+    --teal-primary: #0d9488;
+    --teal-hover: #0f766e;
+    --teal-light: #ccfbf1;
+    --color-pass: #16a34a;
+    --bg-pass: #dcfce7;
+    --color-review: #d97706;
+    --bg-review: #fef3c7;
+    --color-hold: #dc2626;
+    --bg-hold: #fee2e2;
+    --color-blocked: #64748b;
+    --bg-blocked: #f1f5f9;
+  }
+
+  /* Global typography and background */
+  .stApp {
+    background-color: var(--bg-page);
+    color: var(--text-black);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  /* Header Typography */
+  .app-header {
+    margin-bottom: 24px;
+    padding-top: 8px;
+  }
+
+  h1.page-title {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--text-black);
+    letter-spacing: -0.02em;
+    margin: 0 0 6px 0;
+  }
+
+  p.main-instruction {
+    font-size: 16px;
+    color: var(--text-muted);
+    font-weight: 500;
+    margin: 0;
+  }
+
+  /* White Card styling */
+  .qc-card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-card);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+
+  .section-heading {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-black);
+    margin: 0 0 16px 0;
+  }
+
+  /* Streamlit Button Tweaks */
+  div.stButton > button {
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 14px;
+    transition: all 0.15s ease-in-out;
+  }
+
+  div.stButton > button[kind="primary"] {
+    background-color: var(--teal-primary) !important;
+    color: #ffffff !important;
+    border: none !important;
+  }
+
+  div.stButton > button[kind="primary"]:hover {
+    background-color: var(--teal-hover) !important;
+  }
+
+  /* Status Badges */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 16px;
+    border-radius: 9999px;
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 16px;
+  }
+
+  .badge-pass {
+    background-color: var(--bg-pass);
+    color: var(--color-pass);
+    border: 1px solid #86efac;
+  }
+
+  .badge-review {
+    background-color: var(--bg-review);
+    color: var(--color-review);
+    border: 1px solid #fde68a;
+  }
+
+  .badge-hold {
+    background-color: var(--bg-hold);
+    color: var(--color-hold);
+    border: 1px solid #fca5a5;
+  }
+
+  .badge-blocked {
+    background-color: var(--bg-blocked);
+    color: var(--color-blocked);
+    border: 1px solid #cbd5e1;
+  }
+
+  /* Action Banner */
+  .action-callout {
+    padding: 16px 20px;
+    border-radius: 8px;
+    margin: 16px 0;
+  }
+
+  .action-callout-label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+
+  .action-callout-text {
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .callout-pass {
+    background-color: #ecfdf5;
+    border-left: 4px solid var(--color-pass);
+    color: #15803d;
+  }
+
+  .callout-review {
+    background-color: #fffbeb;
+    border-left: 4px solid var(--color-review);
+    color: #b45309;
+  }
+
+  .callout-hold {
+    background-color: #fef2f2;
+    border-left: 4px solid var(--color-hold);
+    color: #b91c1c;
+  }
+
+  .callout-blocked {
+    background-color: #f8fafc;
+    border-left: 4px solid #64748b;
+    color: #334155;
+  }
+
+  /* Details Table */
+  .details-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    margin-top: 8px;
+  }
+
+  .details-table th, .details-table td {
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  .details-table th {
+    color: #64748b;
+    font-weight: 600;
+  }
+
+  .details-table td {
+    color: #000000;
+  }
+
+  /* QA Summary Box */
+  .qa-summary-card {
+    background-color: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 18px;
+    margin-top: 16px;
+  }
+
+  .qa-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+
+  .badge-gemini {
+    background-color: var(--teal-light);
+    color: var(--teal-hover);
+    border: 1px solid #99f6e4;
+  }
+
+  .badge-local {
+    background-color: #e2e8f0;
+    color: #334155;
+    border: 1px solid #cbd5e1;
+  }
+
+  .qa-text {
+    font-size: 15px;
+    color: #000000;
+    line-height: 1.5;
+  }
+
+  .empty-preview {
+    border: 2px dashed #cbd5e1;
+    border-radius: 8px;
+    padding: 24px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+</style>
 """
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
+# ---------------------------------------------------------------------------
+# Pipeline Resource Loader
+# ---------------------------------------------------------------------------
+@st.cache_resource(show_spinner="Loading Inspection Models...")
+def load_pipeline():
+    """Load and cache the two-stage inspection pipeline."""
+    return ImpellerQCPipeline()
+
+pipeline = load_pipeline()
+
+# ---------------------------------------------------------------------------
+# Sample Assets Definition
+# ---------------------------------------------------------------------------
+SAMPLES = {
+    "unsupported": {
+        "id": "sample_unsupported",
+        "btn_label": "🚫 Unsupported part",
+        "path": Path("sample_assets") / "sample_unsupported.jpg",
+        "filename": "sample_unsupported.jpg",
+        "expected": "Unsupported Image"
+    },
+    "pass": {
+        "id": "sample_pass",
+        "btn_label": "✅ Pass Candidate",
+        "path": Path("sample_assets") / "sample_pass.jpeg",
+        "filename": "sample_pass.jpeg",
+        "expected": "Pass Candidate"
+    },
+    "review": {
+        "id": "sample_review",
+        "btn_label": "⚠️ Manual Review",
+        "path": Path("sample_assets") / "sample_review.jpeg",
+        "filename": "sample_review.jpeg",
+        "expected": "Manual Review"
+    },
+    "hold": {
+        "id": "sample_hold",
+        "btn_label": "🛑 Hold",
+        "path": Path("sample_assets") / "sample_hold.jpeg",
+        "filename": "sample_hold.jpeg",
+        "expected": "Hold"
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Gemini Configuration & Call Logic
+# ---------------------------------------------------------------------------
 class GeminiCallError(Exception):
     pass
 
@@ -802,43 +329,51 @@ class TemporaryServiceError(GeminiCallError):
     pass
 
 def get_gemini_config():
-    """Load Gemini configuration with environment variables taking precedence over .streamlit/secrets.toml.
+    """Load Gemini configuration with environment variables taking precedence over Streamlit secrets.
     
     Order of precedence:
     1. Environment variables:
        - GEMINI_API_KEY
        - GEMINI_MODEL (default: gemini-3.5-flash-lite)
        - GEMINI_FALLBACK_MODEL (default: gemini-3.1-flash-lite)
-    2. .streamlit/secrets.toml:
-       - GEMINI_API_KEY / gemini_api_key / gemini.api_key
-       - GEMINI_MODEL / model / model_id / primary_model / gemini.model
-       - GEMINI_FALLBACK_MODEL / fallback_model / fallback_model_id / gemini.fallback_model
-    3. Built-in defaults:
-       - Primary: gemini-3.5-flash-lite
-       - Fallback: gemini-3.1-flash-lite
+    2. st.secrets / .streamlit/secrets.toml:
+       - GEMINI_API_KEY / gemini_api_key / api_key / gemini.api_key
+       - GEMINI_MODEL / model / model_id / primary_model
+       - GEMINI_FALLBACK_MODEL / fallback_model / fallback_model_id
     """
-    secrets = {}
+    secrets_dict = {}
+    # Check st.secrets
+    try:
+        if hasattr(st, "secrets") and st.secrets is not None:
+            secrets_dict = dict(st.secrets)
+    except Exception:
+        pass
+
+    # Fallback to direct secrets.toml read if st.secrets is empty
     secrets_path = Path(".streamlit") / "secrets.toml"
-    if secrets_path.exists():
+    if not secrets_dict and secrets_path.exists():
         try:
             with open(secrets_path, "rb") as f:
-                secrets = tomllib.load(f)
+                secrets_dict = tomllib.load(f)
         except Exception as e:
             sys.stderr.write(f"Warning: Failed to parse {secrets_path}: {e}\n")
 
     def lookup_secret(keys):
         for k in keys:
-            if k in secrets and isinstance(secrets[k], str) and secrets[k].strip():
-                return secrets[k].strip()
-            gemini_sec = secrets.get("gemini", {})
+            if k in secrets_dict and isinstance(secrets_dict[k], str) and secrets_dict[k].strip():
+                return secrets_dict[k].strip()
+            gemini_sec = secrets_dict.get("gemini", {})
             if isinstance(gemini_sec, dict) and k in gemini_sec and isinstance(gemini_sec[k], str) and gemini_sec[k].strip():
                 return gemini_sec[k].strip()
         return None
 
     # 1. API Key
     api_key = os.environ.get("GEMINI_API_KEY")
+    key_src = "environment" if api_key else None
     if not api_key:
         api_key = lookup_secret(["GEMINI_API_KEY", "gemini_api_key", "api_key", "key"])
+        if api_key:
+            key_src = "streamlit_secrets"
 
     # 2. Primary Model ID
     primary_model = os.environ.get("GEMINI_MODEL") or os.environ.get("GEMINI_PRIMARY_MODEL")
@@ -858,18 +393,18 @@ def get_gemini_config():
         "api_key": api_key,
         "primary_model": primary_model,
         "fallback_model": fallback_model,
-        "secrets_file_exists": secrets_path.exists(),
         "key_configured": bool(api_key),
-        "key_source": "environment" if os.environ.get("GEMINI_API_KEY") else ("secrets.toml" if api_key else "none")
+        "key_source": key_src or "none"
     }
 
 def generate_local_summary(data):
     """Generate a deterministic, rule-governed Local QA summary based strictly on the existing QC decision."""
     action_label = data.get("action_label", "Pass Candidate")
-    p_def = data.get("defective_probability")
+    detector = data.get("defect_detector", {})
+    p_def = detector.get("defective_probability")
     next_action = data.get("next_action", "")
-    tau_pass = data.get("pass_threshold", 0.50)
-    tau_hold = data.get("hold_threshold", 0.76)
+    tau_pass = detector.get("pass_threshold", 0.50)
+    tau_hold = detector.get("hold_threshold", 0.76)
 
     score_str = f"{p_def:.4f}" if p_def is not None else "N/A"
 
@@ -895,10 +430,10 @@ def build_gemini_prompt(data):
     """Construct a strict, operator-facing prompt for Gemini based solely on QC scores."""
     action_label = data.get("action_label", "Unknown")
     next_action = data.get("next_action", "")
-    p_supp = data.get("supported_probability", 0.0)
-    p_def = data.get("defective_probability", 0.0)
-    tau_pass = data.get("pass_threshold", 0.50)
-    tau_hold = data.get("hold_threshold", 0.76)
+    p_supp = data.get("gatekeeper", {}).get("supported_probability", 0.0)
+    p_def = data.get("defect_detector", {}).get("defective_probability", 0.0)
+    tau_pass = data.get("defect_detector", {}).get("pass_threshold", 0.50)
+    tau_hold = data.get("defect_detector", {}).get("hold_threshold", 0.76)
 
     if action_label == "Pass Candidate":
         action_instruction = "Use the exact phrase: 'Pass candidate. Follow your normal release procedure.'"
@@ -935,7 +470,7 @@ def _call_gemini_api(model_name, api_key, prompt, timeout=10, simulate=None):
         elif sim in ["timeout"]:
             raise TemporaryServiceError(f"Simulated network timeout connecting to {model_name}")
         elif sim in ["success", "mock_success"]:
-            return f"QA summary verified ({model_name}): Part disposition complies with QC threshold policy."
+            return f"QA summary ({model_name}): Part disposition complies with QC threshold policy."
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
     payload = json.dumps({
@@ -981,8 +516,7 @@ def _call_gemini_api(model_name, api_key, prompt, timeout=10, simulate=None):
         raise TemporaryServiceError(f"Temporary network/service error: {e}")
 
 def generate_gemini_qa_summary(data, api_key=None, config_override=None, simulation=None):
-    """
-    Generate an operator QA summary using Gemini with model fallback,
+    """Generate an operator QA summary using Gemini with model fallback,
     or display a clearly labeled Local summary based on the existing QC decision if neither model can answer.
     """
     config = config_override or get_gemini_config()
@@ -1004,7 +538,7 @@ def generate_gemini_qa_summary(data, api_key=None, config_override=None, simulat
             "fallback_used": False,
             "primary_model": primary_model,
             "fallback_model": fallback_model,
-            "reason": "GEMINI_API_KEY is not configured in environment or .streamlit/secrets.toml.",
+            "reason": "GEMINI_API_KEY is not configured in environment or Streamlit Secrets.",
             "error": None
         }
 
@@ -1051,7 +585,7 @@ def generate_gemini_qa_summary(data, api_key=None, config_override=None, simulat
         primary_error = str(e)
         should_fallback = True
 
-    # Step 2: Try fallback model ONCE for model unavailability, quota limits, or temporary service error
+    # Step 2: Try fallback model ONCE
     fallback_error = None
     if should_fallback:
         try:
@@ -1072,7 +606,7 @@ def generate_gemini_qa_summary(data, api_key=None, config_override=None, simulat
         except Exception as e:
             fallback_error = str(e)
 
-    # Step 3: If neither model can answer -> show a clearly labeled Local summary based on the existing QC decision!
+    # Step 3: Neither model could answer -> Local summary fallback
     local_text = generate_local_summary(data)
     return {
         "success": True,
@@ -1090,215 +624,264 @@ def generate_gemini_qa_summary(data, api_key=None, config_override=None, simulat
         "error": None
     }
 
-class QCDemoHandler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args):
-        # Concise logging
-        sys.stderr.write(f"[{self.log_date_time_string()}] {args[0]} {args[1]}\n")
+# ---------------------------------------------------------------------------
+# Streamlit Application State
+# ---------------------------------------------------------------------------
+if "active_bytes" not in st.session_state:
+    st.session_state["active_bytes"] = None
+if "active_filename" not in st.session_state:
+    st.session_state["active_filename"] = None
+if "active_source" not in st.session_state:
+    st.session_state["active_source"] = None
+if "qa_summary" not in st.session_state:
+    st.session_state["qa_summary"] = None
+if "uploader_key" not in st.session_state:
+    st.session_state["uploader_key"] = 0
 
-    def do_GET(self):
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path
+def select_image(img_bytes, filename, source="sample"):
+    st.session_state["active_bytes"] = img_bytes
+    st.session_state["active_filename"] = filename
+    st.session_state["active_source"] = source
+    # Clear any previous QA summary on image change
+    st.session_state["qa_summary"] = None
 
-        if path == "/" or path == "/index.html":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(HTML_TEMPLATE.encode("utf-8"))
-            return
-
-        elif path.startswith("/samples/"):
-            sample_id = path.replace("/samples/", "").strip()
-            if sample_id in samples:
-                self.send_response(200)
-                self.send_header("Content-Type", "image/jpeg")
-                self.send_header("Cache-Control", "public, max-age=3600")
-                self.end_headers()
-                self.wfile.write(samples[sample_id]["bytes"])
-                return
-            else:
-                self.send_error(404, f"Sample '{sample_id}' not found")
-                return
-
-        elif path == "/api/health":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            cfg = get_gemini_config()
-            health_info = {
-                "status": "healthy",
-                "gatekeeper_threshold": pipeline.gate_threshold,
-                "pass_threshold": pipeline.pass_threshold,
-                "hold_threshold": pipeline.hold_threshold,
-                "gemini_configured": cfg["key_configured"],
-                "gemini_key_source": cfg["key_source"],
-                "gemini_primary_model": cfg["primary_model"],
-                "gemini_fallback_model": cfg["fallback_model"],
-                "samples_loaded": list(samples.keys())
-            }
-            self.wfile.write(json.dumps(health_info).encode("utf-8"))
-            return
-
-        self.send_error(404, "Page Not Found")
-
-    def do_POST(self):
-        parsed = urllib.parse.urlparse(self.path)
-        content_length = int(self.headers.get("Content-Length", 0))
-
-        if parsed.path == "/api/inspect":
-            body = self.rfile.read(content_length)
-            content_type = self.headers.get("Content-Type", "")
-
-            if "application/json" in content_type:
-                data = json.loads(body.decode("utf-8"))
-                if "sample_id" in data:
-                    sample_id = data["sample_id"]
-                    if sample_id in samples:
-                        item = samples[sample_id]
-                        res = pipeline.inspect(item["bytes"], filename=item["filename"])
-                        self._send_json(res)
-                        return
-                    else:
-                        self.send_error(400, f"Invalid sample_id: {sample_id}")
-                        return
-                elif "image_base64" in data:
-                    raw_bytes = base64.b64decode(data["image_base64"])
-                    filename = data.get("filename", "uploaded_image.jpg")
-                    res = pipeline.inspect(raw_bytes, filename=filename)
-                    self._send_json(res)
-                    return
-                else:
-                    self.send_error(400, "Missing sample_id or image_base64")
-                    return
-            else:
-                # Raw binary upload
-                res = pipeline.inspect(body, filename="uploaded_image.jpg")
-                self._send_json(res)
-                return
-
-        elif parsed.path == "/api/qa-summary":
-            # Gemini QA summary request (sends ONLY inspection result and model scores)
-            body = self.rfile.read(content_length)
-            data = json.loads(body.decode("utf-8"))
-            
-            # Allow mock_key or simulation for testing
-            api_key = data.get("mock_api_key") or data.get("api_key")
-            simulation = data.get("simulation") or data.get("simulate_error")
-
-            qa_res = generate_gemini_qa_summary(data, api_key=api_key, simulation=simulation)
-            self._send_json(qa_res)
-            return
-
-        self.send_error(404, "Endpoint not found")
-
-    def _send_json(self, data, status_code=200):
-        self.send_response(status_code)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(json.dumps(data, indent=2).encode("utf-8"))
-
-def preload_samples():
-    """Extract sample images for 1-click testing from bundled sample_assets/ (or fallback to archives)."""
-    global samples
-    print("Pre-loading sample images for demo...")
-    sample_dir = Path("sample_assets")
-
-    # 1. Unsupported sample
-    unsupp_bundled = sample_dir / "sample_unsupported.jpg"
-    unsupp_raw = Path("unsupported_data/similar_parts/pump_housings/pump_housing_005_housing_for_modern_pump_at_westonzo.jpg")
-
-    if unsupp_bundled.is_file():
-        samples["sample_unsupported"] = {
-            "bytes": unsupp_bundled.read_bytes(),
-            "filename": unsupp_bundled.name,
-            "label": "Pump Housing (Unsupported)"
-        }
-    elif unsupp_raw.is_file():
-        samples["sample_unsupported"] = {
-            "bytes": unsupp_raw.read_bytes(),
-            "filename": unsupp_raw.name,
-            "label": "Pump Housing (Unsupported)"
-        }
-
-    # 2. Supported samples
-    sample_targets = {
-        "sample_pass": {
-            "bundled": sample_dir / "sample_pass.jpeg",
-            "zip_path": "casting_data/test/ok_front/cast_ok_0_1093.jpeg",
-            "label": "Pass Candidate"
-        },
-        "sample_review": {
-            "bundled": sample_dir / "sample_review.jpeg",
-            "zip_path": "casting_data/train/def_front/cast_def_0_2518.jpeg",
-            "label": "Manual Review"
-        },
-        "sample_hold": {
-            "bundled": sample_dir / "sample_hold.jpeg",
-            "zip_path": "casting_data/test/def_front/cast_def_0_1292.jpeg",
-            "label": "Hold"
-        }
-    }
-
-    casting_zip = Path("casting_data.zip")
-    zip_obj = ZipFile(casting_zip, "r") if casting_zip.is_file() else None
-
-    for sid, info in sample_targets.items():
-        if info["bundled"].is_file():
-            samples[sid] = {
-                "bytes": info["bundled"].read_bytes(),
-                "filename": info["bundled"].name,
-                "label": info["label"]
-            }
-        elif zip_obj is not None:
-            try:
-                samples[sid] = {
-                    "bytes": zip_obj.read(info["zip_path"]),
-                    "filename": Path(info["zip_path"]).name,
-                    "label": info["label"]
-                }
-            except KeyError:
-                pass
-
-    if zip_obj:
-        zip_obj.close()
-
-    print(f"Loaded {len(samples)} sample images into memory for instant testing.")
-
+# ---------------------------------------------------------------------------
+# UI Layout
+# ---------------------------------------------------------------------------
 def main():
-    global pipeline
-    parser = argparse.ArgumentParser(description="Pump Impeller Quality Inspector Demo")
-    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8080)), help="Port to listen on (default: 8080 or $PORT)")
-    parser.add_argument("--host", type=str, default=os.environ.get("HOST", "0.0.0.0"), help="Host interface (default: 0.0.0.0)")
-    args = parser.parse_args()
+    # Header Section
+    st.markdown("""
+    <div class="app-header">
+      <h1 class="page-title">Pump Impeller Quality Inspector</h1>
+      <p class="main-instruction">Upload a top-view photo of a pump impeller</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    print("=" * 75)
-    print("PUMP IMPELLER QUALITY INSPECTOR: DEMO APPLICATION")
-    print("=" * 75)
+    # Two-Column Layout (stacks on mobile)
+    col_left, col_right = st.columns([5, 6], gap="large")
 
-    pipeline = ImpellerQCPipeline()
-    preload_samples()
+    # =========================================================================
+    # LEFT COLUMN: Upload, Samples & Preview
+    # =========================================================================
+    with col_left:
+        # Card 1: Image Input
+        st.markdown('<div class="qc-card"><h2 class="section-heading">Image Input</h2>', unsafe_allow_html=True)
+        
+        uploaded = st.file_uploader(
+            "Upload an image (JPG, PNG)",
+            type=["jpg", "jpeg", "png"],
+            key=f"file_uploader_{st.session_state['uploader_key']}",
+            help="Select a top-view photograph of a cast pump impeller."
+        )
 
-    server_address = (args.host, args.port)
-    httpd = ThreadingHTTPServer(server_address, QCDemoHandler)
-    url = f"http://{args.host}:{args.port}"
+        if uploaded is not None:
+            new_bytes = uploaded.getvalue()
+            # If the user uploaded a new file, update active image
+            if st.session_state.get("uploaded_name") != uploaded.name or st.session_state.get("active_bytes") != new_bytes:
+                st.session_state["uploaded_name"] = uploaded.name
+                select_image(new_bytes, uploaded.name, source="upload")
+                st.rerun()
 
-    cfg = get_gemini_config()
-    print("-" * 75)
-    print(f"Web Application is LIVE at: {url}")
-    print(f"  - Bound Host & Port:    {args.host}:{args.port}")
-    if args.host == "0.0.0.0":
-        print(f"  - Local Browser URL:    http://127.0.0.1:{args.port} or http://localhost:{args.port}")
-    print(f"  - Gatekeeper Cutoff:    tau = {pipeline.gate_threshold:.4f}")
-    print(f"  - Defect QC Cutoffs:    Pass < {pipeline.pass_threshold:.2f}, Hold >= {pipeline.hold_threshold:.2f}")
-    print(f"  - Gemini Configuration: {cfg['primary_model']} (Fallback: {cfg['fallback_model']})")
-    print(f"  - Gemini API Key:       {'Configured (' + cfg['key_source'] + ')' if cfg['key_configured'] else 'Not configured (Local summary active)'}")
-    print(f"  - Press Ctrl+C in this terminal to stop the server.")
-    print("=" * 75)
+        # Try a sample section
+        st.markdown('<p style="font-weight: 600; font-size: 14px; margin: 16px 0 8px 0; color: #475569;">Try a sample</p>', unsafe_allow_html=True)
+        
+        row1_col1, row1_col2 = st.columns(2)
+        with row1_col1:
+            if st.button("🚫 Unsupported part", use_container_width=True):
+                info = SAMPLES["unsupported"]
+                if info["path"].exists():
+                    select_image(info["path"].read_bytes(), info["filename"], source="sample_unsupported")
+                    st.rerun()
 
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        print("\nShutting down QC Inspector server.")
-        httpd.server_close()
+        with row1_col2:
+            if st.button("✅ Pass Candidate", use_container_width=True):
+                info = SAMPLES["pass"]
+                if info["path"].exists():
+                    select_image(info["path"].read_bytes(), info["filename"], source="sample_pass")
+                    st.rerun()
+
+        row2_col1, row2_col2 = st.columns(2)
+        with row2_col1:
+            if st.button("⚠️ Manual Review", use_container_width=True):
+                info = SAMPLES["review"]
+                if info["path"].exists():
+                    select_image(info["path"].read_bytes(), info["filename"], source="sample_review")
+                    st.rerun()
+
+        with row2_col2:
+            if st.button("🛑 Hold", use_container_width=True):
+                info = SAMPLES["hold"]
+                if info["path"].exists():
+                    select_image(info["path"].read_bytes(), info["filename"], source="sample_hold")
+                    st.rerun()
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # Card 2: Image Preview
+        st.markdown('<div class="qc-card"><h2 class="section-heading">Image Preview</h2>', unsafe_allow_html=True)
+        if st.session_state["active_bytes"]:
+            try:
+                img = Image.open(io.BytesIO(st.session_state["active_bytes"]))
+                st.image(img, caption=f"Active: {st.session_state['active_filename']}", use_container_width=True)
+            except Exception as e:
+                st.error(f"Failed to display image: {e}")
+        else:
+            st.markdown('<div class="empty-preview">No image selected.<br>Upload an image or click a sample above.</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # =========================================================================
+    # RIGHT COLUMN: Results, Next Action, QA Summary & Details
+    # =========================================================================
+    with col_right:
+        if not st.session_state["active_bytes"]:
+            st.markdown("""
+            <div class="qc-card" style="text-align: center; padding: 48px 24px;">
+              <h2 class="section-heading" style="color: #64748b;">Ready for Inspection</h2>
+              <p style="color: #64748b; font-size: 15px;">
+                Upload a top-view photo of a pump impeller or select one of the sample images on the left to view the automated quality control decision.
+              </p>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            # Run two-stage inference
+            inspection = pipeline.inspect(
+                st.session_state["active_bytes"],
+                filename=st.session_state["active_filename"]
+            )
+            action_label = inspection.get("action_label", "Unknown")
+            status = inspection.get("status", "BLOCKED")
+            next_action = inspection.get("next_action", "")
+            gatekeeper = inspection.get("gatekeeper", {})
+            defect_det = inspection.get("defect_detector", {})
+
+            # Map status badge classes
+            if status == "BLOCKED":
+                badge_class = "badge-blocked"
+                callout_class = "callout-blocked"
+                badge_icon = "🚫"
+            elif action_label == "Pass Candidate":
+                badge_class = "badge-pass"
+                callout_class = "callout-pass"
+                badge_icon = "✅"
+            elif action_label == "Manual Review":
+                badge_class = "badge-review"
+                callout_class = "callout-review"
+                badge_icon = "⚠️"
+            elif action_label == "Hold":
+                badge_class = "badge-hold"
+                callout_class = "callout-hold"
+                badge_icon = "🛑"
+            else:
+                badge_class = "badge-blocked"
+                callout_class = "callout-blocked"
+                badge_icon = "ℹ️"
+
+            # Primary Decision Card
+            st.markdown(f"""
+            <div class="qc-card">
+              <h2 class="section-heading">Inspection Result</h2>
+              <div>
+                <span class="status-badge {badge_class}">
+                  {badge_icon} {action_label}
+                </span>
+              </div>
+              <div class="action-callout {callout_class}">
+                <div class="action-callout-label">Prescribed Next Action</div>
+                <div class="action-callout-text">{next_action}</div>
+              </div>
+              <p style="font-size: 14px; color: #475569; margin-top: 8px;">
+                {inspection.get("message", "")}
+              </p>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Gemini QA Summary Card
+            if status == "BLOCKED":
+                st.markdown("""
+                <div class="qc-card">
+                  <h2 class="section-heading">QA Summary</h2>
+                  <p style="color: #64748b; font-size: 14px;">
+                    QA Summary is only available for supported impeller images. Please upload a supported top-view impeller photo to proceed with defect assessment.
+                  </p>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="qc-card"><h2 class="section-heading">AI QA Summary</h2>', unsafe_allow_html=True)
+                
+                # Check if user clicked Generate QA Summary
+                col_btn, col_info = st.columns([1, 1])
+                with col_btn:
+                    if st.button("Generate QA Summary", type="primary", use_container_width=True):
+                        with st.spinner("Generating operator QA summary..."):
+                            summary_res = generate_gemini_qa_summary(inspection)
+                            st.session_state["qa_summary"] = summary_res
+
+                # Display existing or newly generated QA Summary
+                summary = st.session_state.get("qa_summary")
+                if summary:
+                    is_local = summary.get("is_local", False)
+                    source_badge = "badge-local" if is_local else "badge-gemini"
+                    source_label = summary.get("label", "Local summary")
+                    summary_text = summary.get("summary", "")
+                    reason = summary.get("reason")
+
+                    reason_html = f'<p style="font-size: 12px; color: #64748b; margin-top: 8px; margin-bottom: 0;"><em>Note: {reason}</em></p>' if reason else ""
+
+                    st.markdown(f"""
+                    <div class="qa-summary-card">
+                      <span class="qa-badge {source_badge}">{source_label}</span>
+                      <div class="qa-text">{summary_text}</div>
+                      {reason_html}
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.caption("Click above to generate a concise, operator-facing QA summary.")
+
+                st.markdown('</div>', unsafe_allow_html=True)
+
+            # Collapsible Inspection Details Card
+            with st.expander("Inspection details", expanded=False):
+                p_supp = gatekeeper.get("supported_probability")
+                supp_str = f"{p_supp:.4f}" if p_supp is not None else "N/A"
+                gate_thresh = gatekeeper.get("threshold", 0.0049)
+
+                p_def = defect_det.get("defective_probability")
+                def_str = f"{p_def:.4f}" if p_def is not None else "Skipped (Blocked at Gatekeeper)"
+                pass_thresh = defect_det.get("pass_threshold", 0.50)
+                hold_thresh = defect_det.get("hold_threshold", 0.76)
+
+                st.markdown(f"""
+                <table class="details-table">
+                  <tr>
+                    <th>Pipeline Stage</th>
+                    <th>Model</th>
+                    <th>Model Score</th>
+                    <th>Decision Threshold</th>
+                    <th>Stage Outcome</th>
+                  </tr>
+                  <tr>
+                    <td><strong>Stage 1: Gatekeeper</strong></td>
+                    <td>MobileNetV2 Input Checker</td>
+                    <td><code>P(supported) = {supp_str}</code></td>
+                    <td>Accept &ge; {gate_thresh:.4f}</td>
+                    <td>{gatekeeper.get("decision", "N/A")}</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Stage 2: Defect Inspector</strong></td>
+                    <td>MobileNetV2 Defect Inspector</td>
+                    <td><code>P(defective) = {def_str}</code></td>
+                    <td>Pass &lt; {pass_thresh:.2f} | Hold &ge; {hold_thresh:.2f}</td>
+                    <td>{defect_det.get("action", "Skipped")}</td>
+                  </tr>
+                </table>
+                """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
-    main()
+    from streamlit.runtime import exists as st_runtime_exists
+    if not st_runtime_exists():
+        import sys
+        from streamlit.web import cli as stcli
+        sys.argv = ["streamlit", "run", sys.argv[0]]
+        sys.exit(stcli.main())
+    else:
+        main()

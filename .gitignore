@@ -12,7 +12,7 @@ ENV/
 .env
 .env.*
 .streamlit/secrets.toml
-.streamlit/
+.streamlit/secrets*.toml
 
 # Full dataset archives and raw image directories (excluded from Git & Render)
 casting_data.zip
