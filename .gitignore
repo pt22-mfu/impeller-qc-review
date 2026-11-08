@@ -1,0 +1,28 @@
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Secret and environment configuration files
+.env
+.env.*
+.streamlit/secrets.toml
+.streamlit/
+
+# Full dataset archives and raw image directories (excluded from Git & Render)
+casting_data.zip
+unsupported_data.zip
+casting_data/
+unsupported_data/
+data/raw/
+
+# System and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

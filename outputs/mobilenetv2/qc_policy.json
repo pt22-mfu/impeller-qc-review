@@ -1,0 +1,153 @@
+{
+  "stage": "Stage 4 - QC Policy & Threshold Selection",
+  "timestamp": "2026-11-08T17:53:37Z",
+  "dataset": {
+    "source_scores_file": "outputs\\mobilenetv2\\validation_scores.csv",
+    "validation_samples": 1044,
+    "actual_ok_samples": 441,
+    "actual_defective_samples": 603,
+    "held_out_test_status": "Strictly held out and unopened (1,041 test samples preserved)"
+  },
+  "routing_policy": {
+    "rules": [
+      {
+        "condition": "defective_probability < pass_threshold",
+        "action": "Pass Candidate"
+      },
+      {
+        "condition": "defective_probability >= hold_threshold",
+        "action": "Hold"
+      },
+      {
+        "condition": "pass_threshold <= defective_probability < hold_threshold",
+        "action": "Manual Review"
+      }
+    ],
+    "chosen_thresholds": {
+      "pass_threshold": 0.5,
+      "hold_threshold": 0.76
+    },
+    "constraints": {
+      "pass_threshold_cap": "<= 0.50",
+      "max_defective_escapes_to_pass": "<= 5.0% of actual defective parts",
+      "min_hold_precision": ">= 98.0%"
+    }
+  },
+  "validation_routing_performance": {
+    "pass_candidate": {
+      "total": 450,
+      "actual_ok": 438,
+      "actual_defective": 12,
+      "defective_escape_count": 12,
+      "defective_escape_rate_pct": 1.99,
+      "ok_purity_pct": 97.33
+    },
+    "hold": {
+      "total": 572,
+      "actual_ok": 0,
+      "actual_defective": 572,
+      "hold_precision_pct": 100.0,
+      "supporting_validation_images": 572,
+      "meets_98_percent_precision": true
+    },
+    "manual_review": {
+      "total": 22,
+      "actual_ok": 3,
+      "actual_defective": 19
+    },
+    "operator_workload_analysis": {
+      "manual_reviews": 22,
+      "hold_confirmations": 572,
+      "total_operator_checks": 594,
+      "baseline_all_checks": 1044,
+      "checks_saved": 450,
+      "workload_reduction_pct": 43.1
+    }
+  },
+  "threshold_sensitivity_sweep": [
+    {
+      "hold_threshold": 0.51,
+      "hold_count": 594,
+      "hold_precision": 0.994949,
+      "hold_ok": 3,
+      "hold_defective": 591,
+      "review_count": 0,
+      "review_ok": 0,
+      "review_defective": 0,
+      "total_operator_checks": 594,
+      "workload_saved_pct": 43.1
+    },
+    {
+      "hold_threshold": 0.537327,
+      "hold_count": 594,
+      "hold_precision": 0.994949,
+      "hold_ok": 3,
+      "hold_defective": 591,
+      "review_count": 0,
+      "review_ok": 0,
+      "review_defective": 0,
+      "total_operator_checks": 594,
+      "workload_saved_pct": 43.1
+    },
+    {
+      "hold_threshold": 0.55,
+      "hold_count": 593,
+      "hold_precision": 0.994941,
+      "hold_ok": 3,
+      "hold_defective": 590,
+      "review_count": 1,
+      "review_ok": 0,
+      "review_defective": 1,
+      "total_operator_checks": 594,
+      "workload_saved_pct": 43.1
+    },
+    {
+      "hold_threshold": 0.6,
+      "hold_count": 587,
+      "hold_precision": 0.998296,
+      "hold_ok": 1,
+      "hold_defective": 586,
+      "review_count": 7,
+      "review_ok": 2,
+      "review_defective": 5,
+      "total_operator_checks": 594,
+      "workload_saved_pct": 43.1
+    },
+    {
+      "hold_threshold": 0.7,
+      "hold_count": 580,
+      "hold_precision": 0.998276,
+      "hold_ok": 1,
+      "hold_defective": 579,
+      "review_count": 14,
+      "review_ok": 2,
+      "review_defective": 12,
+      "total_operator_checks": 594,
+      "workload_saved_pct": 43.1
+    },
+    {
+      "hold_threshold": 0.76,
+      "hold_count": 572,
+      "hold_precision": 1.0,
+      "hold_ok": 0,
+      "hold_defective": 572,
+      "review_count": 22,
+      "review_ok": 3,
+      "review_defective": 19,
+      "total_operator_checks": 594,
+      "workload_saved_pct": 43.1
+    },
+    {
+      "hold_threshold": 0.8,
+      "hold_count": 561,
+      "hold_precision": 1.0,
+      "hold_ok": 0,
+      "hold_defective": 561,
+      "review_count": 33,
+      "review_ok": 3,
+      "review_defective": 30,
+      "total_operator_checks": 594,
+      "workload_saved_pct": 43.1
+    }
+  ]
+}

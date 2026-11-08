@@ -1,0 +1,14 @@
+{
+  "threshold": 0.004900000000000001,
+  "accuracy": 1.0,
+  "supported_precision": 1.0,
+  "supported_recall": 1.0,
+  "unsupported_precision": 1.0,
+  "unsupported_recall": 1.0,
+  "confusion_matrix": {
+    "true_unsupported_pred_unsupported_TN": 13,
+    "true_unsupported_pred_supported_FP": 0,
+    "true_supported_pred_unsupported_FN": 0,
+    "true_supported_pred_supported_TP": 1044
+  }
+}

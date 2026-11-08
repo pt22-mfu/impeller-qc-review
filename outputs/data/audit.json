@@ -1,0 +1,27 @@
+{
+  "readable_images": 7348,
+  "unreadable_images": [],
+  "removed_images": 64,
+  "retained_images": 7284,
+  "original_cross_split_exact_pixel_groups": 64,
+  "phash_max_hamming_distance": 2,
+  "candidate_pair_count": 3122,
+  "candidate_cross_label_pair_count": 141,
+  "group_count": 5292,
+  "largest_group": 44,
+  "seed": 1501418,
+  "counts_by_split_and_class": {
+    "train": {
+      "def_front": 3006,
+      "ok_front": 2193
+    },
+    "validation": {
+      "def_front": 603,
+      "ok_front": 441
+    },
+    "test": {
+      "def_front": 602,
+      "ok_front": 439
+    }
+  }
+}

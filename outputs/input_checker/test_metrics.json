@@ -1,0 +1,102 @@
+{
+  "evaluation_split": "held_out_test",
+  "threshold": 0.004900000000000001,
+  "total_test_samples": 1058,
+  "overall_accuracy": 0.998109640831758,
+  "supported_evaluation": {
+    "total_supported": 1041,
+    "supported_accepted": 1041,
+    "supported_wrongly_blocked": 0,
+    "supported_acceptance_rate": 1.0,
+    "breakdown_by_impeller_defect_status": {
+      "ok_good_impellers": {
+        "total": 439,
+        "accepted": 439,
+        "wrongly_blocked": 0,
+        "wrongly_blocked_rate": 0.0
+      },
+      "defective_impellers": {
+        "total": 602,
+        "accepted": 602,
+        "wrongly_blocked": 0,
+        "wrongly_blocked_rate": 0.0
+      }
+    }
+  },
+  "unsupported_evaluation": {
+    "total_unsupported": 17,
+    "unsupported_rejected": 15,
+    "unsupported_wrongly_accepted": 2,
+    "unsupported_rejection_rate": 0.8823529411764706,
+    "category_breakdown": {
+      "bearing": {
+        "total": 3,
+        "rejected": 2,
+        "wrongly_accepted": 1,
+        "rejection_rate": 0.6666666666666666,
+        "mean_score": 0.05282852803096224,
+        "max_score": 0.15833769738674164
+      },
+      "misoriented_impeller": {
+        "total": 2,
+        "rejected": 1,
+        "wrongly_accepted": 1,
+        "rejection_rate": 0.5,
+        "mean_score": 0.003890912630595267,
+        "max_score": 0.00513487821444869
+      },
+      "pump_housing": {
+        "total": 2,
+        "rejected": 2,
+        "wrongly_accepted": 0,
+        "rejection_rate": 1.0,
+        "mean_score": 5.859158059706715e-05,
+        "max_score": 0.00011656279093585908
+      },
+      "round_metal_component": {
+        "total": 4,
+        "rejected": 4,
+        "wrongly_accepted": 0,
+        "rejection_rate": 1.0,
+        "mean_score": 1.1028385998201884e-05,
+        "max_score": 2.9355569495237432e-05
+      },
+      "unrelated_general": {
+        "total": 4,
+        "rejected": 4,
+        "wrongly_accepted": 0,
+        "rejection_rate": 1.0,
+        "mean_score": 0.0020913533808197826,
+        "max_score": 0.0027135733980685472
+      },
+      "unrelated_industrial": {
+        "total": 2,
+        "rejected": 2,
+        "wrongly_accepted": 0,
+        "rejection_rate": 1.0,
+        "mean_score": 0.001686927251284942,
+        "max_score": 0.002668154425919056
+      }
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "Unsupported (0)",
+      "Supported (1)"
+    ],
+    "matrix": [
+      [
+        15,
+        2
+      ],
+      [
+        0,
+        1041
+      ]
+    ],
+    "true_unsupported_pred_unsupported_TN": 15,
+    "true_unsupported_pred_supported_FP": 2,
+    "true_supported_pred_unsupported_FN": 0,
+    "true_supported_pred_supported_TP": 1041
+  }
+}

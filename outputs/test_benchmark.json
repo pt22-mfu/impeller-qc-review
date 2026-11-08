@@ -1,0 +1,95 @@
+{
+  "stage": "Stage 5 - Held-Out Test Evaluation & Comparison Benchmark",
+  "timestamp": "2026-11-08T19:07:22Z",
+  "dataset": {
+    "split": "test",
+    "samples_evaluated": 1041,
+    "actual_ok_samples": 439,
+    "actual_defective_samples": 602
+  },
+  "model_comparison_at_0_50": {
+    "baseline_logistic_regression": {
+      "accuracy": 0.8376560999039385,
+      "precision": 0.8356589147286821,
+      "recall": 0.8953488372093024,
+      "f1": 0.8644747393744988,
+      "confusion_matrix": {
+        "class_order": [
+          "OK",
+          "Defective"
+        ],
+        "matrix": [
+          [
+            333,
+            106
+          ],
+          [
+            63,
+            539
+          ]
+        ],
+        "tn": 333,
+        "fp": 106,
+        "fn": 63,
+        "tp": 539
+      }
+    },
+    "mobilenetv2_transfer_learning": {
+      "accuracy": 0.9913544668587896,
+      "precision": 0.9933444259567388,
+      "recall": 0.9916943521594684,
+      "f1": 0.9925187032418953,
+      "confusion_matrix": {
+        "class_order": [
+          "OK",
+          "Defective"
+        ],
+        "matrix": [
+          [
+            435,
+            4
+          ],
+          [
+            5,
+            597
+          ]
+        ],
+        "tn": 435,
+        "fp": 4,
+        "fn": 5,
+        "tp": 597
+      }
+    }
+  },
+  "locked_qc_policy_test_performance": {
+    "pass_threshold": 0.5,
+    "hold_threshold": 0.76,
+    "routing_actions": {
+      "pass_candidate": {
+        "total": 440,
+        "actual_ok": 435,
+        "actual_defective": 5,
+        "defect_escape_rate_pct": 0.83
+      },
+      "hold": {
+        "total": 581,
+        "actual_ok": 1,
+        "actual_defective": 580,
+        "hold_precision_pct": 99.83
+      },
+      "manual_review": {
+        "total": 20,
+        "actual_ok": 3,
+        "actual_defective": 17
+      }
+    },
+    "operator_workload": {
+      "manual_reviews": 20,
+      "hold_confirmations": 581,
+      "total_operator_checks": 601,
+      "baseline_all_checks": 1041,
+      "checks_saved": 440,
+      "workload_reduction_pct": 42.27
+    }
+  }
+}

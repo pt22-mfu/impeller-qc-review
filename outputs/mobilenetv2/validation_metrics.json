@@ -1,0 +1,55 @@
+{
+  "stage": "Stage 3 - MobileNetV2 Transfer Learning",
+  "timestamp": "2026-11-08T17:39:04Z",
+  "architecture": {
+    "backbone": "MobileNetV2 (ImageNet pretrained, frozen)",
+    "input_resolution": [
+      160,
+      160,
+      3
+    ],
+    "embedded_preprocessing": [
+      "Resizing(160, 160)",
+      "Rescaling(1/127.5, offset=-1.0)"
+    ],
+    "trainable_parameters": 1281,
+    "non_trainable_parameters": 2257984
+  },
+  "training_parameters": {
+    "max_epochs": 8,
+    "epochs_trained": 8,
+    "batch_size": 32,
+    "learning_rate": 0.001,
+    "optimizer": "Adam",
+    "seed": 1501418
+  },
+  "validation_evaluation": {
+    "probability_threshold": 0.5,
+    "positive_class": "Defective (1)",
+    "negative_class": "OK (0)",
+    "accuracy": 0.985632,
+    "precision": 0.994949,
+    "recall": 0.9801,
+    "f1_score": 0.987469,
+    "confusion_matrix": {
+      "class_order": [
+        "OK",
+        "Defective"
+      ],
+      "matrix": [
+        [
+          438,
+          3
+        ],
+        [
+          12,
+          591
+        ]
+      ],
+      "true_negative_ok": 438,
+      "false_positive_defective": 3,
+      "false_negative_ok": 12,
+      "true_positive_defective": 591
+    }
+  }
+}

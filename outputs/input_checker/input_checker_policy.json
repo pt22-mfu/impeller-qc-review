@@ -1,0 +1,82 @@
+{
+  "model_name": "input_checker_mobilenetv2.keras",
+  "target_definition": {
+    "1": "Supported (valid top-view cast impeller)",
+    "0": "Unsupported (out-of-scope part, wrong-view impeller, unrelated object)"
+  },
+  "routing_rule": {
+    "accepted": "supported_probability >= 0.0049",
+    "blocked": "supported_probability < 0.0049"
+  },
+  "threshold": 0.004900000000000001,
+  "optimization_constraint": "Supported Acceptance Rate >= 95.0% on validation set",
+  "optimization_objective": "Maximize Unsupported Rejection on validation set",
+  "validation_summary": {
+    "supported_total": 1044,
+    "supported_accepted": 1044,
+    "supported_wrongly_blocked": 0,
+    "supported_acceptance_rate": 1.0,
+    "unsupported_total": 13,
+    "unsupported_rejected": 13,
+    "unsupported_wrongly_accepted": 0,
+    "unsupported_rejection_rate": 1.0,
+    "confusion_matrix_labels": [
+      "Unsupported (0)",
+      "Supported (1)"
+    ],
+    "confusion_matrix": [
+      [
+        13,
+        0
+      ],
+      [
+        0,
+        1044
+      ]
+    ]
+  },
+  "unsupported_category_breakdown": {
+    "bearing": {
+      "total": 3,
+      "rejected": 3,
+      "wrongly_accepted": 0,
+      "rejection_rate": 1.0,
+      "mean_score": 0.00015019656044993704
+    },
+    "misoriented_impeller": {
+      "total": 1,
+      "rejected": 1,
+      "wrongly_accepted": 0,
+      "rejection_rate": 1.0,
+      "mean_score": 0.0024197774473577738
+    },
+    "pump_housing": {
+      "total": 2,
+      "rejected": 2,
+      "wrongly_accepted": 0,
+      "rejection_rate": 1.0,
+      "mean_score": 7.987284334376454e-05
+    },
+    "round_metal_component": {
+      "total": 3,
+      "rejected": 3,
+      "wrongly_accepted": 0,
+      "rejection_rate": 1.0,
+      "mean_score": 0.00031469767964154016
+    },
+    "unrelated_general": {
+      "total": 2,
+      "rejected": 2,
+      "wrongly_accepted": 0,
+      "rejection_rate": 1.0,
+      "mean_score": 0.004509945400059223
+    },
+    "unrelated_industrial": {
+      "total": 2,
+      "rejected": 2,
+      "wrongly_accepted": 0,
+      "rejection_rate": 1.0,
+      "mean_score": 0.0002043293570750393
+    }
+  }
+}
