@@ -1,7 +1,9 @@
-"""Automated verification script for Streamlit app, pipeline, and Gemini QA summary."""
+"""Automated verification script for Streamlit app, pipeline, test pack ZIP, and Gemini QA summary."""
+import io
 import json
 import os
 import sys
+import zipfile
 from pathlib import Path
 
 # Set up test environment
@@ -102,12 +104,54 @@ def test_attribution_and_exclusions():
     assert "Raviraj Joshi" in content, "Attribution to Raviraj Joshi should be present"
     print("PASS: sample_assets/ATTRIBUTION.md contains CC BY-NC-ND 4.0 and Raviraj Joshi.")
 
+def test_test_pack_download_and_upload():
+    print("\n--- 6. Testing Demo Test Pack ZIP Download & Manual Upload Simulation ---")
+    zip_bytes = app.build_test_pack_zip()
+    assert len(zip_bytes) > 0, "ZIP buffer should not be empty"
+    print(f"ZIP package generated successfully ({len(zip_bytes)} bytes).")
+
+    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+        namelist = zf.namelist()
+        print(f"Entries in ZIP: {namelist}")
+        assert "README.txt" in namelist, "README.txt should be in the test pack ZIP"
+        
+        readme_text = zf.read("README.txt").decode("utf-8")
+        assert "Pump Impeller Quality Inspector - Demo Test Pack" in readme_text
+        assert "sample_unsupported.jpg" in readme_text
+        assert "sample_pass.jpeg" in readme_text
+        assert "sample_review.jpeg" in readme_text
+        assert "sample_hold.jpeg" in readme_text
+        assert "CC BY-NC-ND 4.0" in readme_text
+        assert "Raviraj Joshi" in readme_text
+        assert "David Smith" in readme_text
+        print("PASS: README.txt contains all expected results and attribution.")
+
+        # Test manual upload simulation for each image extracted from the ZIP
+        pipe = app.load_pipeline()
+        expected = {
+            "sample_unsupported.jpg": ("BLOCKED", "Unsupported Image", "Upload a top-view photo of a pump impeller"),
+            "sample_pass.jpeg": ("ACCEPTED", "Pass Candidate", "Pass candidate. Follow your normal release procedure."),
+            "sample_review.jpeg": ("ACCEPTED", "Manual Review", "Conduct visual inspection at review station"),
+            "sample_hold.jpeg": ("ACCEPTED", "Hold", "Hold for supervisor review.")
+        }
+
+        for filename, (exp_status, exp_label, exp_action) in expected.items():
+            assert filename in namelist, f"{filename} missing from ZIP"
+            extracted_bytes = zf.read(filename)
+            res = pipe.inspect(extracted_bytes, filename=filename)
+            print(f"Manual upload from ZIP: {filename} -> status={res['status']}, label={res['action_label']}, action={res['next_action']}")
+            assert res["status"] == exp_status, f"Status mismatch for {filename}"
+            assert res["action_label"] == exp_label, f"Label mismatch for {filename}"
+            assert res["next_action"] == exp_action, f"Next action mismatch for {filename}"
+        print("PASS: All 4 images extracted from test pack ZIP verified via manual upload simulation.")
+
 if __name__ == "__main__":
     test_gemini_config()
     results = test_four_sample_outcomes()
     test_gemini_live_summary(results["pass"])
     test_fallback_and_local_summary(results["pass"])
     test_attribution_and_exclusions()
+    test_test_pack_download_and_upload()
     print("\n" + "="*60)
     print("ALL VERIFICATION CHECKS PASSED SUCCESSFULLY!")
     print("="*60)

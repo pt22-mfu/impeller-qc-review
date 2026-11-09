@@ -17,6 +17,7 @@ import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from pathlib import Path
 
 from PIL import Image
@@ -63,10 +64,10 @@ CUSTOM_CSS = """
     line-height: 1.5;
   }
 
-  /* Header Typography */
+  /* Header Section */
   .app-header {
-    margin-bottom: 24px;
-    padding-top: 8px;
+    margin-bottom: 20px;
+    padding-top: 4px;
   }
 
   h1.page-title {
@@ -74,7 +75,7 @@ CUSTOM_CSS = """
     font-weight: 700;
     color: var(--text-black);
     letter-spacing: -0.02em;
-    margin: 0 0 6px 0;
+    margin: 0 0 4px 0;
   }
 
   p.main-instruction {
@@ -84,28 +85,21 @@ CUSTOM_CSS = """
     margin: 0;
   }
 
-  /* White Card styling */
+  /* Compact White Card styling */
   .qc-card {
     background-color: var(--bg-card);
     border: 1px solid var(--border-card);
     border-radius: 12px;
-    padding: 24px;
-    margin-bottom: 20px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   }
 
-  .section-heading {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--text-black);
-    margin: 0 0 16px 0;
-  }
-
-  /* Streamlit Button Tweaks */
-  div.stButton > button {
+  /* Button Tweaks */
+  div.stButton > button, div.stDownloadButton > button {
     border-radius: 8px;
     font-weight: 600;
-    font-size: 14px;
+    font-size: 13px;
     transition: all 0.15s ease-in-out;
   }
 
@@ -123,11 +117,11 @@ CUSTOM_CSS = """
   .status-badge {
     display: inline-flex;
     align-items: center;
-    padding: 8px 16px;
+    padding: 6px 14px;
     border-radius: 9999px;
-    font-size: 18px;
+    font-size: 17px;
     font-weight: 700;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
   }
 
   .badge-pass {
@@ -156,21 +150,21 @@ CUSTOM_CSS = """
 
   /* Action Banner */
   .action-callout {
-    padding: 16px 20px;
+    padding: 14px 18px;
     border-radius: 8px;
-    margin: 16px 0;
+    margin: 12px 0;
   }
 
   .action-callout-label {
-    font-size: 12px;
+    font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-weight: 700;
-    margin-bottom: 4px;
+    margin-bottom: 3px;
   }
 
   .action-callout-text {
-    font-size: 18px;
+    font-size: 17px;
     font-weight: 700;
   }
 
@@ -202,12 +196,12 @@ CUSTOM_CSS = """
   .details-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 14px;
-    margin-top: 8px;
+    font-size: 13px;
+    margin-top: 6px;
   }
 
   .details-table th, .details-table td {
-    padding: 8px 12px;
+    padding: 6px 10px;
     text-align: left;
     border-bottom: 1px solid #e2e8f0;
   }
@@ -226,17 +220,17 @@ CUSTOM_CSS = """
     background-color: #f8fafc;
     border: 1px solid #cbd5e1;
     border-radius: 8px;
-    padding: 18px;
-    margin-top: 16px;
+    padding: 14px 16px;
+    margin-top: 12px;
   }
 
   .qa-badge {
     display: inline-block;
-    padding: 3px 10px;
+    padding: 2px 8px;
     border-radius: 4px;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
   }
 
   .badge-gemini {
@@ -252,7 +246,7 @@ CUSTOM_CSS = """
   }
 
   .qa-text {
-    font-size: 15px;
+    font-size: 14px;
     color: #000000;
     line-height: 1.5;
   }
@@ -260,10 +254,10 @@ CUSTOM_CSS = """
   .empty-preview {
     border: 2px dashed #cbd5e1;
     border-radius: 8px;
-    padding: 24px;
+    padding: 20px;
     text-align: center;
     color: var(--text-muted);
-    font-size: 14px;
+    font-size: 13px;
   }
 </style>
 """
@@ -280,7 +274,7 @@ def load_pipeline():
 pipeline = load_pipeline()
 
 # ---------------------------------------------------------------------------
-# Sample Assets Definition
+# Sample Assets Definition & Test Pack Builder
 # ---------------------------------------------------------------------------
 SAMPLES = {
     "unsupported": {
@@ -313,6 +307,62 @@ SAMPLES = {
     }
 }
 
+@st.cache_data
+def build_test_pack_zip():
+    """Build an in-memory ZIP package containing the 4 test images and a short README."""
+    readme_text = """Pump Impeller Quality Inspector - Demo Test Pack
+===================================================
+
+This demo test pack contains four curated images to test the automated
+two-stage machine vision inspection pipeline:
+- Stage 1: Gatekeeper Input Checker (acceptance cutoff: tau >= 0.0049)
+- Stage 2: Defect Inspection Classifier (Pass < 0.50, Hold >= 0.76)
+
+1. Files & Expected Demonstration Results:
+------------------------------------------
+- sample_unsupported.jpg
+  Expected Decision: Unsupported Image (BLOCKED at Stage 1 Gatekeeper)
+  P(supported) < 0.0049 (actual: 0.0000)
+  Stage 2 Defect Detector: Skipped
+  Prescribed Next Action: "Upload a top-view photo of a pump impeller"
+
+- sample_pass.jpeg
+  Expected Decision: Pass Candidate (ACCEPTED at Stage 1)
+  P(supported) >= 0.0049 (actual: 1.0000)
+  P(defective) < 0.50 (actual: 0.0046)
+  Prescribed Next Action: "Pass candidate. Follow your normal release procedure."
+
+- sample_review.jpeg
+  Expected Decision: Manual Review (ACCEPTED at Stage 1)
+  P(supported) >= 0.0049 (actual: 1.0000)
+  0.50 <= P(defective) < 0.76 (actual: 0.5843)
+  Prescribed Next Action: "Conduct visual inspection at review station"
+
+- sample_hold.jpeg
+  Expected Decision: Hold (ACCEPTED at Stage 1)
+  P(supported) >= 0.0049 (actual: 1.0000)
+  P(defective) >= 0.76 (actual: 0.8878)
+  Prescribed Next Action: "Hold for supervisor review."
+
+2. Licensing & Attribution:
+---------------------------
+- Casting Product Images (sample_pass.jpeg, sample_review.jpeg, sample_hold.jpeg):
+  Licensed under Creative Commons Attribution-NonCommercial-NoDerivatives 4.0
+  International (CC BY-NC-ND 4.0) by dataset provider Raviraj Joshi via Kaggle.
+
+- Pump Housing Image (sample_unsupported.jpg):
+  Licensed under Creative Commons Attribution-ShareAlike 2.0 Generic
+  (CC BY-SA 2.0) by David Smith via Geograph / Wikimedia Commons.
+"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("README.txt", readme_text)
+        for _, info in SAMPLES.items():
+            if info["path"].exists():
+                zf.write(info["path"], arcname=info["filename"])
+    buf.seek(0)
+    return buf.getvalue()
+
 # ---------------------------------------------------------------------------
 # Gemini Configuration & Call Logic
 # ---------------------------------------------------------------------------
@@ -329,27 +379,14 @@ class TemporaryServiceError(GeminiCallError):
     pass
 
 def get_gemini_config():
-    """Load Gemini configuration with environment variables taking precedence over Streamlit secrets.
-    
-    Order of precedence:
-    1. Environment variables:
-       - GEMINI_API_KEY
-       - GEMINI_MODEL (default: gemini-3.5-flash-lite)
-       - GEMINI_FALLBACK_MODEL (default: gemini-3.1-flash-lite)
-    2. st.secrets / .streamlit/secrets.toml:
-       - GEMINI_API_KEY / gemini_api_key / api_key / gemini.api_key
-       - GEMINI_MODEL / model / model_id / primary_model
-       - GEMINI_FALLBACK_MODEL / fallback_model / fallback_model_id
-    """
+    """Load Gemini configuration with environment variables taking precedence over Streamlit secrets."""
     secrets_dict = {}
-    # Check st.secrets
     try:
         if hasattr(st, "secrets") and st.secrets is not None:
             secrets_dict = dict(st.secrets)
     except Exception:
         pass
 
-    # Fallback to direct secrets.toml read if st.secrets is empty
     secrets_path = Path(".streamlit") / "secrets.toml"
     if not secrets_dict and secrets_path.exists():
         try:
@@ -367,7 +404,6 @@ def get_gemini_config():
                 return gemini_sec[k].strip()
         return None
 
-    # 1. API Key
     api_key = os.environ.get("GEMINI_API_KEY")
     key_src = "environment" if api_key else None
     if not api_key:
@@ -375,14 +411,12 @@ def get_gemini_config():
         if api_key:
             key_src = "streamlit_secrets"
 
-    # 2. Primary Model ID
     primary_model = os.environ.get("GEMINI_MODEL") or os.environ.get("GEMINI_PRIMARY_MODEL")
     if not primary_model:
         primary_model = lookup_secret(["GEMINI_MODEL", "model", "model_id", "primary_model"])
     if not primary_model:
         primary_model = "gemini-3.5-flash-lite"
 
-    # 3. Fallback Model ID
     fallback_model = os.environ.get("GEMINI_FALLBACK_MODEL")
     if not fallback_model:
         fallback_model = lookup_secret(["GEMINI_FALLBACK_MODEL", "fallback_model", "fallback_model_id"])
@@ -525,7 +559,6 @@ def generate_gemini_qa_summary(data, api_key=None, config_override=None, simulat
     primary_model = config.get("primary_model", "gemini-3.5-flash-lite")
     fallback_model = config.get("fallback_model", "gemini-3.1-flash-lite")
 
-    # If key is missing, neither model can answer -> show Local summary
     if not key:
         local_text = generate_local_summary(data)
         return {
@@ -606,7 +639,7 @@ def generate_gemini_qa_summary(data, api_key=None, config_override=None, simulat
         except Exception as e:
             fallback_error = str(e)
 
-    # Step 3: Neither model could answer -> Local summary fallback
+    # Step 3: Local summary fallback
     local_text = generate_local_summary(data)
     return {
         "success": True,
@@ -642,14 +675,13 @@ def select_image(img_bytes, filename, source="sample"):
     st.session_state["active_bytes"] = img_bytes
     st.session_state["active_filename"] = filename
     st.session_state["active_source"] = source
-    # Clear any previous QA summary on image change
     st.session_state["qa_summary"] = None
 
 # ---------------------------------------------------------------------------
 # UI Layout
 # ---------------------------------------------------------------------------
 def main():
-    # Header Section
+    # Compact Header Section
     st.markdown("""
     <div class="app-header">
       <h1 class="page-title">Pump Impeller Quality Inspector</h1>
@@ -661,14 +693,14 @@ def main():
     col_left, col_right = st.columns([5, 6], gap="large")
 
     # =========================================================================
-    # LEFT COLUMN: Upload, Samples & Preview
+    # LEFT COLUMN: Uploader, Samples, Download Pack & Image Preview
     # =========================================================================
     with col_left:
-        # Card 1: Image Input
-        st.markdown('<div class="qc-card"><h2 class="section-heading">Image Input</h2>', unsafe_allow_html=True)
+        st.markdown('<div class="qc-card">', unsafe_allow_html=True)
         
+        # File uploader
         uploaded = st.file_uploader(
-            "Upload an image (JPG, PNG)",
+            "Upload top-view impeller photo (JPG, PNG)",
             type=["jpg", "jpeg", "png"],
             key=f"file_uploader_{st.session_state['uploader_key']}",
             help="Select a top-view photograph of a cast pump impeller."
@@ -676,49 +708,57 @@ def main():
 
         if uploaded is not None:
             new_bytes = uploaded.getvalue()
-            # If the user uploaded a new file, update active image
             if st.session_state.get("uploaded_name") != uploaded.name or st.session_state.get("active_bytes") != new_bytes:
                 st.session_state["uploaded_name"] = uploaded.name
                 select_image(new_bytes, uploaded.name, source="upload")
                 st.rerun()
 
-        # Try a sample section
-        st.markdown('<p style="font-weight: 600; font-size: 14px; margin: 16px 0 8px 0; color: #475569;">Try a sample</p>', unsafe_allow_html=True)
-        
-        row1_col1, row1_col2 = st.columns(2)
-        with row1_col1:
+        # Try a sample header + Download test pack button side-by-side
+        col_s_label, col_s_dl = st.columns([1, 1], vertical_alignment="center")
+        with col_s_label:
+            st.markdown('<p style="font-weight: 600; font-size: 14px; margin: 8px 0 4px 0; color: #475569;">Try a sample</p>', unsafe_allow_html=True)
+        with col_s_dl:
+            test_pack_bytes = build_test_pack_zip()
+            st.download_button(
+                label="📦 Download test images",
+                data=test_pack_bytes,
+                file_name="impeller_qc_demo_test_pack.zip",
+                mime="application/zip",
+                use_container_width=True,
+                help="Download demo test pack ZIP containing the 4 test images and expected results."
+            )
+
+        # 4 sample buttons in a 2x2 grid
+        row1_c1, row1_c2 = st.columns(2)
+        with row1_c1:
             if st.button("🚫 Unsupported part", use_container_width=True):
                 info = SAMPLES["unsupported"]
                 if info["path"].exists():
                     select_image(info["path"].read_bytes(), info["filename"], source="sample_unsupported")
                     st.rerun()
-
-        with row1_col2:
+        with row1_c2:
             if st.button("✅ Pass Candidate", use_container_width=True):
                 info = SAMPLES["pass"]
                 if info["path"].exists():
                     select_image(info["path"].read_bytes(), info["filename"], source="sample_pass")
                     st.rerun()
 
-        row2_col1, row2_col2 = st.columns(2)
-        with row2_col1:
+        row2_c1, row2_c2 = st.columns(2)
+        with row2_c1:
             if st.button("⚠️ Manual Review", use_container_width=True):
                 info = SAMPLES["review"]
                 if info["path"].exists():
                     select_image(info["path"].read_bytes(), info["filename"], source="sample_review")
                     st.rerun()
-
-        with row2_col2:
+        with row2_c2:
             if st.button("🛑 Hold", use_container_width=True):
                 info = SAMPLES["hold"]
                 if info["path"].exists():
                     select_image(info["path"].read_bytes(), info["filename"], source="sample_hold")
                     st.rerun()
 
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        # Card 2: Image Preview
-        st.markdown('<div class="qc-card"><h2 class="section-heading">Image Preview</h2>', unsafe_allow_html=True)
+        # Image preview right inside the same card
+        st.markdown('<hr style="margin: 14px 0; border: none; border-top: 1px solid #e2e8f0;">', unsafe_allow_html=True)
         if st.session_state["active_bytes"]:
             try:
                 img = Image.open(io.BytesIO(st.session_state["active_bytes"]))
@@ -727,17 +767,18 @@ def main():
                 st.error(f"Failed to display image: {e}")
         else:
             st.markdown('<div class="empty-preview">No image selected.<br>Upload an image or click a sample above.</div>', unsafe_allow_html=True)
+
         st.markdown('</div>', unsafe_allow_html=True)
 
     # =========================================================================
-    # RIGHT COLUMN: Results, Next Action, QA Summary & Details
+    # RIGHT COLUMN: Decision First, Gemini Summary, Collapsed Details
     # =========================================================================
     with col_right:
         if not st.session_state["active_bytes"]:
             st.markdown("""
-            <div class="qc-card" style="text-align: center; padding: 48px 24px;">
-              <h2 class="section-heading" style="color: #64748b;">Ready for Inspection</h2>
-              <p style="color: #64748b; font-size: 15px;">
+            <div class="qc-card" style="text-align: center; padding: 40px 20px;">
+              <p style="font-size: 18px; font-weight: 600; color: #334155; margin-bottom: 8px;">Ready for Inspection</p>
+              <p style="color: #64748b; font-size: 14px; margin: 0;">
                 Upload a top-view photo of a pump impeller or select one of the sample images on the left to view the automated quality control decision.
               </p>
             </div>
@@ -776,10 +817,9 @@ def main():
                 callout_class = "callout-blocked"
                 badge_icon = "ℹ️"
 
-            # Primary Decision Card
+            # 1. Primary Decision & Next Action First
             st.markdown(f"""
             <div class="qc-card">
-              <h2 class="section-heading">Inspection Result</h2>
               <div>
                 <span class="status-badge {badge_class}">
                   {badge_icon} {action_label}
@@ -789,34 +829,29 @@ def main():
                 <div class="action-callout-label">Prescribed Next Action</div>
                 <div class="action-callout-text">{next_action}</div>
               </div>
-              <p style="font-size: 14px; color: #475569; margin-top: 8px;">
+              <p style="font-size: 14px; color: #475569; margin: 6px 0 0 0;">
                 {inspection.get("message", "")}
               </p>
-            </div>
             """, unsafe_allow_html=True)
 
-            # Gemini QA Summary Card
+            # 2. Gemini QA Summary immediately following
             if status == "BLOCKED":
                 st.markdown("""
-                <div class="qc-card">
-                  <h2 class="section-heading">QA Summary</h2>
-                  <p style="color: #64748b; font-size: 14px;">
-                    QA Summary is only available for supported impeller images. Please upload a supported top-view impeller photo to proceed with defect assessment.
-                  </p>
+                <div style="font-size: 13px; color: #64748b; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px; margin-top: 14px;">
+                  QA Summary is only available for supported impeller images. Please upload a supported top-view impeller photo.
+                </div>
                 </div>
                 """, unsafe_allow_html=True)
             else:
-                st.markdown('<div class="qc-card"><h2 class="section-heading">AI QA Summary</h2>', unsafe_allow_html=True)
+                st.markdown('<hr style="margin: 14px 0 10px 0; border: none; border-top: 1px solid #e2e8f0;">', unsafe_allow_html=True)
                 
-                # Check if user clicked Generate QA Summary
-                col_btn, col_info = st.columns([1, 1])
+                col_btn, col_info = st.columns([1, 1], vertical_alignment="center")
                 with col_btn:
                     if st.button("Generate QA Summary", type="primary", use_container_width=True):
                         with st.spinner("Generating operator QA summary..."):
                             summary_res = generate_gemini_qa_summary(inspection)
                             st.session_state["qa_summary"] = summary_res
 
-                # Display existing or newly generated QA Summary
                 summary = st.session_state.get("qa_summary")
                 if summary:
                     is_local = summary.get("is_local", False)
@@ -824,8 +859,7 @@ def main():
                     source_label = summary.get("label", "Local summary")
                     summary_text = summary.get("summary", "")
                     reason = summary.get("reason")
-
-                    reason_html = f'<p style="font-size: 12px; color: #64748b; margin-top: 8px; margin-bottom: 0;"><em>Note: {reason}</em></p>' if reason else ""
+                    reason_html = f'<p style="font-size: 11px; color: #64748b; margin-top: 6px; margin-bottom: 0;"><em>Note: {reason}</em></p>' if reason else ""
 
                     st.markdown(f"""
                     <div class="qa-summary-card">
@@ -839,7 +873,7 @@ def main():
 
                 st.markdown('</div>', unsafe_allow_html=True)
 
-            # Collapsible Inspection Details Card
+            # 3. Collapsible Inspection Details directly below
             with st.expander("Inspection details", expanded=False):
                 p_supp = gatekeeper.get("supported_probability")
                 supp_str = f"{p_supp:.4f}" if p_supp is not None else "N/A"

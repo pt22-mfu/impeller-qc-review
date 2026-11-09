@@ -219,29 +219,30 @@ Held-out test results summary (1,058 test images):
   - `misoriented_impeller`: 1/2 rejected (50.0%)
 - **Overall Held-Out Test Accuracy**: **1,056 / 1,058 (99.81%)**
 
-## Stage 7: Pump Impeller Quality Inspector Demo & Gemini QA Integration
+## Stage 7: Pump Impeller Quality Inspector Demo & Streamlit Deployment
 
-Launch the interactive web application to demonstrate the sequential two-stage QC pipeline (**Upload $\to$ Input Checker $\to$ Defect Detector**) with Gemini QA summary synthesis:
+Launch the interactive web application to run the sequential two-stage QC pipeline (**Upload → Input Checker → Defect Detector**) with Gemini QA summary synthesis:
 
 ```powershell
-.\.venv\Scripts\python.exe app.py
+.\.venv\Scripts\streamlit.exe run app.py
 ```
+*(Alternatively: `.\.venv\Scripts\python.exe app.py`)*
 
-Then open **`http://127.0.0.1:8080`** in your browser.
+Then open **`http://localhost:8501`** in your browser.
 
 ### UI & Pipeline Specifications
 
 - **Header**: "Pump Impeller Quality Inspector" with main instruction "Upload a top-view photo of a pump impeller".
 - **Styling**: White cards, light grey background (`#f1f5f9`), teal primary actions (`#0d9488`), pure black text (`#000000`), 32px desktop title, 20px section headings, 16px body text.
-- **Layout**: Left column for upload and compact image preview; right column for prominent result and next action. Responsive stack on narrow screens.
-- **Four Standard Labels**:
+- **Layout**: Left column for upload, "Try a sample" (4 buttons), and compact image preview; right column for prominent result, prescribed next action, QA summary, and collapsible inspection details. Responsive stack on narrow screens.
+- **Four Standard Decision Labels & Wording**:
   1. `Unsupported Image`: Triggered when Stage 1 gatekeeper blocks image ($p < 0.0049$). Next action: *"Upload a top-view photo of a pump impeller"*.
-  2. `Pass Candidate`: Triggered when defect score $p < 0.50$. Next action: *"Release part to next production step"*.
+  2. `Pass Candidate`: Triggered when defect score $p < 0.50$. Next action: *"Pass candidate. Follow your normal release procedure."*
   3. `Manual Review`: Triggered when defect score $0.50 \le p < 0.76$. Next action: *"Conduct visual inspection at review station"*.
-  4. `Hold`: Triggered when defect score $p \ge 0.76$. Next action: *"Hold part for quality supervisor disposition"*.
-- **Inspection Details**: Collapsed `<details>` section containing raw probability scores and policy thresholds, removing defect type and severity claims.
+  4. `Hold`: Triggered when defect score $p \ge 0.76$. Next action: *"Hold for supervisor review."*
+- **Inspection Details**: Collapsed section containing raw probability scores and policy thresholds, removing defect type and severity claims.
 - **Gemini QA Configuration & Dual-Model Fallback**:
-  - **Secrets & Precedence**: Reads `GEMINI_API_KEY`, `GEMINI_MODEL`, and `GEMINI_FALLBACK_MODEL` from `.streamlit/secrets.toml`, with environment variables taking highest precedence. `.streamlit/secrets.toml` is strictly git-ignored.
+  - **Secrets & Precedence**: Reads `GEMINI_API_KEY`, `GEMINI_MODEL`, and `GEMINI_FALLBACK_MODEL` from Streamlit Secrets (`st.secrets`), with environment variables taking highest precedence. Local secrets (`.streamlit/secrets.toml`) are strictly git-ignored.
   - **Model Hierarchy**: Defaults to `gemini-3.5-flash-lite` (primary) with `gemini-3.1-flash-lite` as the single fallback.
   - **Automatic Fallback**: Tries the fallback model once upon encountering model unavailability (HTTP 404), model-specific quota limits (HTTP 429), or temporary service errors (HTTP 5xx / timeout).
   - **Local Summary Guardrail**: If neither model can answer (or API key is absent), displays a clearly labeled `Local summary` based strictly on the deterministic QC decision and prescribed next action.
@@ -250,71 +251,42 @@ Then open **`http://127.0.0.1:8080`** in your browser.
 
 ### Verification Suite
 
-Run the dedicated Gemini configuration and fallback test suite:
+Run the full Streamlit verification suite:
 
 ```powershell
-.\.venv\Scripts\python.exe test_gemini_config_and_fallback.py
-```
-
-Run the full end-to-end interactive demo verification suite:
-
-```powershell
-# In terminal 1 (or background):
-.\.venv\Scripts\python.exe app.py --port 8086
-
-# In terminal 2:
-.\.venv\Scripts\python.exe verify_polished_demo.py
+.\.venv\Scripts\python.exe test_streamlit_app.py
 ```
 
 ### Stage 7 Deliverables
 
 | File | Status | Purpose |
 |---|---|---|
-| `app.py` | Completed | Web dashboard with upload, sample buttons, collapsed details, Gemini config & Local summary |
+| `app.py` | Completed | Native Streamlit web dashboard with upload, sample buttons, collapsed details, Gemini config & Local summary |
 | `pipeline.py` | Completed | Two-stage inference pipeline class connecting gatekeeper and defect models |
 | `sample_assets/` | Completed | Curated 4 sample images and attribution file for zero-archive lightweight deployment |
-| `requirements.txt` | Completed | Pinned Linux CPU-compatible dependencies for cloud deployment (`tensorflow-cpu`, `Pillow`, etc.) |
-| `runtime.txt` | Completed | Pinned Python 3.11.9 runtime for Render deployment |
+| `sample_assets/ATTRIBUTION.md` | Completed | Attribution and licensing (CC BY-NC-ND 4.0 by Raviraj Joshi, CC BY-SA 2.0 by David Smith) |
+| `requirements.txt` | Completed | Pinned Linux CPU-compatible dependencies for Streamlit Cloud (`streamlit`, `tensorflow-cpu`, `Pillow`, etc.) |
+| `.streamlit/config.toml` | Completed | Streamlit theme (teal `#0d9488`, white cards, grey background, black text) and server config |
 | `.streamlit/secrets.toml` | Completed | Local git-ignored secrets configuration for Gemini API key and model IDs |
-| `test_gemini_config_and_fallback.py` | Completed | Unit test suite for config hierarchy, mock fallback, Local summary, and live requests |
-| `verify_polished_demo.py` | Completed | End-to-end integration test verifying UI, 4 samples, upload, fallback, and live Gemini QA |
-| `smoke_test_demo.py` | Completed | Pipeline unit test confirming all 4 QC outcomes |
-| `test_demo_client.py` | Completed | Automated HTTP client verifying API endpoints and live routing |
+| `test_streamlit_app.py` | Completed | Unit & integration test verifying UI, 4 samples, fallback, Local summary, and live Gemini QA |
 
-## Production Cloud Deployment (Render)
+## Production Deployment: Streamlit Community Cloud
 
-This repository is optimized for standalone, lightweight container deployment on [Render](https://render.com) (or any containerized Linux environment) without needing the 90+ MB raw dataset archives.
+This repository is optimized for one-click deployment on [Streamlit Community Cloud](https://share.streamlit.io/) without requiring the 90+ MB raw dataset archives.
 
-### 1. Render Web Service Configuration
-- **Environment**: `Python`
-- **Build Command**: `pip install -r requirements.txt`
-- **Start Command**: `python app.py`
-- **Auto-Deploy**: `Yes` (deploys on every push to `main`)
+### 1. App Configuration
+- **Repository**: `pt22-mfu/impeller-qc-review`
+- **Branch**: `main`
+- **Main file path**: `app.py`
 
-### 2. Render Environment Variables
-| Variable Name | Required | Default / Recommended Value | Purpose |
-| :--- | :---: | :--- | :--- |
-| `PYTHON_VERSION` | Yes | `3.11.9` | Ensures exact Python runtime matching pre-compiled wheels |
-| `PORT` | Auto | (Set dynamically by Render, e.g. `10000`) | Server automatically reads `$PORT` and binds to `0.0.0.0` |
-| `GEMINI_API_KEY` | Optional | `AIzaSy...` | Enables Google Gemini QA summaries. If omitted, Local summary activates automatically. |
-
-### 3. First GitHub Push Commands
-```bash
-# 1. Stage all tracked project files (secrets and dataset archives are automatically ignored)
-git add .
-
-# 2. Commit the production deployment state
-git commit -m "feat: complete impeller QC inspector demo with two-stage pipeline and Gemini QA"
-
-# 3. Rename branch to main
-git branch -M main
-
-# 4. Link to your GitHub repository (replace with your repo URL)
-git remote add origin https://github.com/<your-username>/impeller-qc-review.git
-
-# 5. Push to GitHub
-git push -u origin main
-```
+### 2. Advanced Settings
+- **Python Version**: `3.11` or `3.12`
+- **Secrets** (configured in Streamlit Cloud Dashboard under App Settings > Secrets):
+  ```toml
+  GEMINI_API_KEY = "AIzaSy..."
+  GEMINI_MODEL = "gemini-3.5-flash-lite"
+  GEMINI_FALLBACK_MODEL = "gemini-3.1-flash-lite"
+  ```
 
 ## Audit outputs
 
