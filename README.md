@@ -219,9 +219,9 @@ Held-out test results summary (1,058 test images):
   - `misoriented_impeller`: 1/2 rejected (50.0%)
 - **Overall Held-Out Test Accuracy**: **1,056 / 1,058 (99.81%)**
 
-## Stage 7: Pump Impeller Quality Inspector Demo & Streamlit Deployment
+## Stage 7: Defect Detection System for Pump Impellers (Streamlit Application)
 
-Launch the interactive web application to run the sequential two-stage QC pipeline (**Upload → Input Checker → Defect Detector**) with Gemini QA summary synthesis:
+Launch the interactive web application:
 
 ```powershell
 .\.venv\Scripts\streamlit.exe run app.py
@@ -230,45 +230,45 @@ Launch the interactive web application to run the sequential two-stage QC pipeli
 
 Then open **`http://localhost:8501`** in your browser.
 
-### UI & Pipeline Specifications
+### Layout, Styling & Interactive 3-Step Workflow
 
-- **Header**: "Pump Impeller Quality Inspector" with main instruction "Upload a top-view photo of a pump impeller".
-- **Styling**: White cards, light grey background (`#f1f5f9`), teal primary actions (`#0d9488`), pure black text (`#000000`), 32px desktop title, 20px section headings, 16px body text.
-- **Layout**: Left column for upload, "Try a sample" (4 buttons), and compact image preview; right column for prominent result, prescribed next action, QA summary, and collapsible inspection details. Responsive stack on narrow screens.
-- **Four Standard Decision Labels & Wording**:
-  1. `Unsupported Image`: Triggered when Stage 1 gatekeeper blocks image ($p < 0.0049$). Next action: *"Upload a top-view photo of a pump impeller"*.
-  2. `Pass Candidate`: Triggered when defect score $p < 0.50$. Next action: *"Pass candidate. Follow your normal release procedure."*
-  3. `Manual Review`: Triggered when defect score $0.50 \le p < 0.76$. Next action: *"Conduct visual inspection at review station"*.
-  4. `Hold`: Triggered when defect score $p \ge 0.76$. Next action: *"Hold for supervisor review."*
-- **Inspection Details**: Collapsed section containing raw probability scores and policy thresholds, removing defect type and severity claims.
-- **Gemini QA Configuration & Dual-Model Fallback**:
-  - **Secrets & Precedence**: Reads `GEMINI_API_KEY`, `GEMINI_MODEL`, and `GEMINI_FALLBACK_MODEL` from Streamlit Secrets (`st.secrets`), with environment variables taking highest precedence. Local secrets (`.streamlit/secrets.toml`) are strictly git-ignored.
-  - **Model Hierarchy**: Defaults to `gemini-3.5-flash-lite` (primary) with `gemini-3.1-flash-lite` as the single fallback.
-  - **Automatic Fallback**: Tries the fallback model once upon encountering model unavailability (HTTP 404), model-specific quota limits (HTTP 429), or temporary service errors (HTTP 5xx / timeout).
-  - **Local Summary Guardrail**: If neither model can answer (or API key is absent), displays a clearly labeled `Local summary` based strictly on the deterministic QC decision and prescribed next action.
-  - **Data Privacy**: The server transmits only numerical inspection probabilities, thresholds, and policy decision metadata (raw images are never sent).
-  - Automatically clears old summaries when a new image or sample is selected.
+- **Desktop 1:2 Layout & Styling**: Uses a white page background (`#ffffff`), light-grey panels (`#f1f5f9`), teal accents (`#0d9488`), light-teal button fills, pure black (`#000000`) text throughout, and `Arial` typography (34 px title, 22 px section headings, 16 px body & buttons). On mobile, stacks cleanly with zero horizontal overflow.
+- **Left Third (`Dataset` & Photo Preview)**:
+  - Blind held-out test selector covering **all 1,041 casting test images** (`5,199` train / `1,044` val / `1,041` test manifest) and **all 17 unsupported test images**, including error cases, with ground-truth labels hidden until explicitly revealed after testing.
+  - Pre-built held-out ZIP & CSV downloads (`data/held_out_test/casting_held_out_test.zip`, `data/held_out_test/unsupported_held_out_test.zip`), exact split manifests (`split_manifest.csv`, `unsupported_manifest.csv`), original image bytes (SHA-256 preserved), source attributions, and full original Kaggle dataset reference.
+  - Displays a short project description before a photo is selected; replaces it with the uncropped full photo preview when selected (and restores the description when cleared).
+  - Secondary **"Quick examples"** section (clearly separate from the full test sets) containing the 4 preset demo shortcuts.
+- **Right Two-Thirds (`Upload a photo`, Step 1 → Step 2 → Step 3)**:
+  1. **Step 1 — Photo Eligibility Check** (runs ONLY the gatekeeper model on upload or dataset/quick selection):
+     - Accepted: displays *"This photo can be checked for defects."* and the **"Check for defects"** button (no defect scores or Gemini button shown yet).
+     - Rejected: displays *"Please upload a clear top-view photo of a pump impeller."* and hides both defect and Gemini buttons.
+  2. **Step 2 — Defect Inspection** (defect model runs ONLY when **"Check for defects"** is clicked):
+     - Displays one result card with `Pass Candidate`, `Manual Review`, or `Hold`, **"What to do next"** directly below, **"OK score"** and **"Defect score"** clearly labeled as model scores, and thresholds/diagnostics inside a collapsed section.
+  3. **Step 3 — Gemini Explanation** (calls Gemini ONLY when **"Explain this result with Gemini"** is clicked):
+     - Reads `GEMINI_API_KEY`, `GEMINI_MODEL`, and `GEMINI_FALLBACK_MODEL` from Streamlit Secrets (`st.secrets`), with environment variables taking precedence. Uses `gemini-3.5-flash-lite` primary → `gemini-3.1-flash-lite` fallback → deterministic `Local summary` guardrail if unreachable. Explains the actual verdict in plain English without changing it or inventing defect details.
+- Changing or clearing the active photo resets Step 2 defect results, Step 3 Gemini explanation, and revealed ground truth, while preserving them across unrelated Streamlit reruns for the same photo.
 
 ### Verification Suite
 
-Run the full Streamlit verification suite:
+Run the unit & live browser verification suite (requires `playwright` + Chrome):
 
 ```powershell
-.\.venv\Scripts\python.exe test_streamlit_app.py
+.\.venv\Scripts\python.exe test_redesign_pipeline.py
 ```
 
 ### Stage 7 Deliverables
 
 | File | Status | Purpose |
 |---|---|---|
-| `app.py` | Completed | Native Streamlit web dashboard with upload, sample buttons, collapsed details, Gemini config & Local summary |
-| `pipeline.py` | Completed | Two-stage inference pipeline class connecting gatekeeper and defect models |
-| `sample_assets/` | Completed | Curated 4 sample images and attribution file for zero-archive lightweight deployment |
-| `sample_assets/ATTRIBUTION.md` | Completed | Attribution and licensing (CC BY-NC-ND 4.0 by Raviraj Joshi, CC BY-SA 2.0 by David Smith) |
-| `requirements.txt` | Completed | Pinned Linux CPU-compatible dependencies for Streamlit Cloud (`streamlit`, `tensorflow-cpu`, `Pillow`, etc.) |
-| `.streamlit/config.toml` | Completed | Streamlit theme (teal `#0d9488`, white cards, grey background, black text) and server config |
+| `app.py` | Completed | Redesigned Streamlit web app with 1:2 layout, blind held-out testing, 3-step gating, and Gemini explanation |
+| `pipeline.py` | Completed | Stage-separated two-model pipeline (`check_eligibility`, `check_defects`, `inspect`) |
+| `prepare_held_out_bundles.py` | Completed | Packages byte-exact held-out test sets (1,041 casting + 17 unsupported) with ground-truth CSVs & attribution |
+| `data/held_out_test/` | Completed | Pre-built `casting_held_out_test.zip` (9.9 MB) and `unsupported_held_out_test.zip` (3.3 MB) |
+| `sample_assets/` | Completed | Curated 4 preset images for the secondary Quick examples section and `ATTRIBUTION.md` |
+| `requirements.txt` | Completed | Pinned Linux CPU-compatible dependencies for Streamlit Cloud |
+| `.streamlit/config.toml` | Completed | White background, light-grey panel, teal accent, and black text theme |
 | `.streamlit/secrets.toml` | Completed | Local git-ignored secrets configuration for Gemini API key and model IDs |
-| `test_streamlit_app.py` | Completed | Unit & integration test verifying UI, 4 samples, fallback, Local summary, and live Gemini QA |
+| `test_redesign_pipeline.py` | Completed | Full unit + Playwright desktop/mobile E2E verification suite |
 
 ## Production Deployment: Streamlit Community Cloud
 

@@ -1,157 +1,118 @@
-"""Automated verification script for Streamlit app, pipeline, test pack ZIP, and Gemini QA summary."""
+"""Automated verification script for redesigned Streamlit app, pipeline, held-out bundles, and Gemini explanation."""
+import hashlib
 import io
-import json
-import os
-import sys
 import zipfile
 from pathlib import Path
 
-# Set up test environment
 import app
+
 
 def test_gemini_config():
     print("\n--- 1. Testing Gemini Configuration ---")
     cfg = app.get_gemini_config()
-    print(f"Key configured: {cfg['key_configured']}")
-    print(f"Key source:     {cfg['key_source']}")
+    print(f"Key configured: {cfg['key_configured']} (source: {cfg['key_source']})")
     print(f"Primary model:  {cfg['primary_model']}")
     print(f"Fallback model: {cfg['fallback_model']}")
     assert cfg["key_configured"], "GEMINI_API_KEY should be configured"
-    assert cfg["primary_model"] == "gemini-3.5-flash-lite", "Primary model should be gemini-3.5-flash-lite"
-    assert cfg["fallback_model"] == "gemini-3.1-flash-lite", "Fallback model should be gemini-3.1-flash-lite"
+    assert cfg["primary_model"] == "gemini-3.5-flash-lite"
+    assert cfg["fallback_model"] == "gemini-3.1-flash-lite"
     print("PASS: Gemini configuration loaded successfully.")
 
-def test_four_sample_outcomes():
-    print("\n--- 2. Testing 4 Sample Outcomes ---")
+
+def test_four_quick_examples_staged():
+    print("\n--- 2. Testing Quick Examples via Staged Pipeline ---")
     pipe = app.load_pipeline()
-    
     expected_outcomes = {
-        "unsupported": {
-            "status": "BLOCKED",
-            "action_label": "Unsupported Image",
-            "next_action": "Upload a top-view photo of a pump impeller"
-        },
-        "pass": {
-            "status": "ACCEPTED",
-            "action_label": "Pass Candidate",
-            "next_action": "Pass candidate. Follow your normal release procedure."
-        },
-        "review": {
-            "status": "ACCEPTED",
-            "action_label": "Manual Review",
-            "next_action": "Conduct visual inspection at review station"
-        },
-        "hold": {
-            "status": "ACCEPTED",
-            "action_label": "Hold",
-            "next_action": "Hold for supervisor review."
-        }
+        "unsupported": ("BLOCKED", "Unsupported Image", "Please upload a clear top-view photo of a pump impeller."),
+        "pass": ("ACCEPTED", "Pass Candidate", "Pass candidate. Follow your normal release procedure."),
+        "review": ("ACCEPTED", "Manual Review", "Conduct visual inspection at review station"),
+        "hold": ("ACCEPTED", "Hold", "Hold for supervisor review."),
     }
 
     results = {}
-    for sample_key, sample_info in app.SAMPLES.items():
-        assert sample_info["path"].exists(), f"Missing file: {sample_info['path']}"
-        raw_bytes = sample_info["path"].read_bytes()
-        res = pipe.inspect(raw_bytes, filename=sample_info["filename"])
-        results[sample_key] = res
-        
-        expected = expected_outcomes[sample_key]
-        print(f"\nSample: {sample_key} ({sample_info['filename']})")
-        print(f"  - Status:       {res['status']} (Expected: {expected['status']})")
-        print(f"  - Action Label: {res['action_label']} (Expected: {expected['action_label']})")
-        print(f"  - Next Action:  {res['next_action']}")
-        
-        assert res["status"] == expected["status"], f"Status mismatch for {sample_key}"
-        assert res["action_label"] == expected["action_label"], f"Action label mismatch for {sample_key}"
-        assert res["next_action"] == expected["next_action"], f"Next action mismatch for {sample_key}"
-        print(f"  PASS: Outcome verified for {sample_key}.")
-
+    for key, info in app.QUICK_EXAMPLES.items():
+        assert info["path"].is_file(), f"Missing quick example file: {info['path']}"
+        raw_bytes = info["path"].read_bytes()
+        elig = pipe.check_eligibility(raw_bytes, filename=info["filename"])
+        if key == "unsupported":
+            assert elig["accepted"] is False
+            assert elig["message"] == expected_outcomes[key][2]
+            print(f"Quick example '{key}' -> REJECTED at Stage 1: {elig['message']}")
+        else:
+            assert elig["accepted"] is True
+            assert elig["message"] == "This photo can be checked for defects."
+            res = pipe.check_defects(raw_bytes, filename=info["filename"], gatekeeper_result=elig)
+            results[key] = res
+            exp_status, exp_label, exp_action = expected_outcomes[key]
+            assert res["status"] == exp_status
+            assert res["action_label"] == exp_label
+            assert res["next_action"] == exp_action
+            p_ok = res["defect_detector"]["ok_probability"]
+            p_def = res["defect_detector"]["defective_probability"]
+            assert abs((p_ok + p_def) - 1.0) < 1e-6
+            print(
+                f"Quick example '{key}' -> Stage 1 OK, Stage 2: {res['action_label']} "
+                f"(OK={p_ok:.4f}, Defect={p_def:.4f})"
+            )
     return results
 
-def test_gemini_live_summary(pass_result):
-    print("\n--- 3. Testing Live Gemini QA Summary ---")
-    summary = app.generate_gemini_qa_summary(pass_result)
-    print(f"Source:     {summary.get('source')}")
-    print(f"Label:      {summary.get('label')}")
-    print(f"Model used: {summary.get('model_used')}")
-    print(f"Summary:    {summary.get('summary')}")
-    
-    assert summary["success"] is True, "Summary generation should succeed"
-    assert summary["source"] in ["gemini", "local"], f"Invalid source: {summary.get('source')}"
-    print("PASS: Live QA summary successfully generated.")
 
-def test_fallback_and_local_summary(pass_result):
-    print("\n--- 4. Testing Fallback & Local Summary Guardrail ---")
-    # 4a. Simulate primary 404 -> fallback succeeds
-    res_fallback = app.generate_gemini_qa_summary(pass_result, simulation={"primary": "404", "fallback": "mock_success"})
+def test_gemini_live_and_fallback(pass_result):
+    print("\n--- 3. Testing Gemini Live Explanation & Fallback ---")
+    res_live = app.generate_gemini_qa_summary(pass_result)
+    print(f"Live Gemini source={res_live['source']} label={res_live['label']}")
+    print(f"Summary: {res_live['summary']}")
+    assert res_live["success"] is True
+
+    res_fallback = app.generate_gemini_qa_summary(
+        pass_result, simulation={"primary": "404", "fallback": "mock_success"}
+    )
     assert res_fallback["fallback_used"] is True
     assert res_fallback["model_used"] == "gemini-3.1-flash-lite"
-    print("PASS: Primary 404 correctly triggers fallback to gemini-3.1-flash-lite.")
+    print("PASS: Primary 404 fell back to gemini-3.1-flash-lite.")
 
-    # 4b. Simulate both fail -> local summary
     res_local = app.generate_gemini_qa_summary(pass_result, simulation="both_fail")
     assert res_local["is_local"] is True
     assert res_local["label"] == "Local summary"
     assert "Pass candidate. Follow your normal release procedure." in res_local["summary"]
-    print("PASS: Both failing correctly produces Local summary.")
+    print("PASS: Dual failure triggered deterministic Local summary guardrail.")
 
-def test_attribution_and_exclusions():
-    print("\n--- 5. Testing Attribution & Git Exclusions ---")
-    attr_path = Path("sample_assets") / "ATTRIBUTION.md"
-    assert attr_path.exists(), "ATTRIBUTION.md missing"
-    content = attr_path.read_text(encoding="utf-8")
-    assert "CC BY-NC-ND 4.0" in content, "Casting dataset license should be CC BY-NC-ND 4.0"
-    assert "Raviraj Joshi" in content, "Attribution to Raviraj Joshi should be present"
-    print("PASS: sample_assets/ATTRIBUTION.md contains CC BY-NC-ND 4.0 and Raviraj Joshi.")
 
-def test_test_pack_download_and_upload():
-    print("\n--- 6. Testing Demo Test Pack ZIP Download & Manual Upload Simulation ---")
-    zip_bytes = app.build_test_pack_zip()
-    assert len(zip_bytes) > 0, "ZIP buffer should not be empty"
-    print(f"ZIP package generated successfully ({len(zip_bytes)} bytes).")
+def test_held_out_bundles_and_attribution():
+    print("\n--- 4. Testing Held-Out Test Bundles & Manifest Splits ---")
+    assert app.CASTING_HELD_OUT_ZIP.is_file(), "Missing casting_held_out_test.zip"
+    assert app.UNSUPP_HELD_OUT_ZIP.is_file(), "Missing unsupported_held_out_test.zip"
 
-    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
-        namelist = zf.namelist()
-        print(f"Entries in ZIP: {namelist}")
-        assert "README.txt" in namelist, "README.txt should be in the test pack ZIP"
-        
-        readme_text = zf.read("README.txt").decode("utf-8")
-        assert "Pump Impeller Quality Inspector - Demo Test Pack" in readme_text
-        assert "sample_unsupported.jpg" in readme_text
-        assert "sample_pass.jpeg" in readme_text
-        assert "sample_review.jpeg" in readme_text
-        assert "sample_hold.jpeg" in readme_text
-        assert "CC BY-NC-ND 4.0" in readme_text
-        assert "Raviraj Joshi" in readme_text
-        assert "David Smith" in readme_text
-        print("PASS: README.txt contains all expected results and attribution.")
+    with zipfile.ZipFile(app.CASTING_HELD_OUT_ZIP, "r") as zf:
+        names = zf.namelist()
+        assert "casting_test_ground_truth.csv" in names
+        assert "ATTRIBUTION.md" in names
+        img_names = [n for n in names if n.startswith("images/")]
+        assert len(img_names) == 1041
 
-        # Test manual upload simulation for each image extracted from the ZIP
-        pipe = app.load_pipeline()
-        expected = {
-            "sample_unsupported.jpg": ("BLOCKED", "Unsupported Image", "Upload a top-view photo of a pump impeller"),
-            "sample_pass.jpeg": ("ACCEPTED", "Pass Candidate", "Pass candidate. Follow your normal release procedure."),
-            "sample_review.jpeg": ("ACCEPTED", "Manual Review", "Conduct visual inspection at review station"),
-            "sample_hold.jpeg": ("ACCEPTED", "Hold", "Hold for supervisor review.")
-        }
+    with zipfile.ZipFile(app.UNSUPP_HELD_OUT_ZIP, "r") as zf:
+        names = zf.namelist()
+        assert "unsupported_test_ground_truth.csv" in names
+        assert "ATTRIBUTION.md" in names
+        img_names = [n for n in names if n.startswith("images/")]
+        assert len(img_names) == 17
 
-        for filename, (exp_status, exp_label, exp_action) in expected.items():
-            assert filename in namelist, f"{filename} missing from ZIP"
-            extracted_bytes = zf.read(filename)
-            res = pipe.inspect(extracted_bytes, filename=filename)
-            print(f"Manual upload from ZIP: {filename} -> status={res['status']}, label={res['action_label']}, action={res['next_action']}")
-            assert res["status"] == exp_status, f"Status mismatch for {filename}"
-            assert res["action_label"] == exp_label, f"Label mismatch for {filename}"
-            assert res["next_action"] == exp_action, f"Next action mismatch for {filename}"
-        print("PASS: All 4 images extracted from test pack ZIP verified via manual upload simulation.")
+    cat = app.load_test_catalog()
+    assert cat["split_counts"] == {"train": 5199, "validation": 1044, "test": 1041}
+    assert cat["unsupp_counts"] == {"train": 60, "validation": 13, "test": 17}
+    assert len(cat["casting"]) == 1041
+    assert len(cat["unsupported"]) == 17
+    # Verify sample raw byte lookup
+    raw = app.read_test_image_bytes(cat["casting"][0])
+    assert hashlib.sha256(raw).hexdigest() == cat["casting"][0]["sha256"]
+    print("PASS: Held-out ZIPs (1,041 + 17) and manifests verified with exact SHA-256 preservation.")
+
 
 if __name__ == "__main__":
     test_gemini_config()
-    results = test_four_sample_outcomes()
-    test_gemini_live_summary(results["pass"])
-    test_fallback_and_local_summary(results["pass"])
-    test_attribution_and_exclusions()
-    test_test_pack_download_and_upload()
-    print("\n" + "="*60)
-    print("ALL VERIFICATION CHECKS PASSED SUCCESSFULLY!")
-    print("="*60)
+    results = test_four_quick_examples_staged()
+    test_gemini_live_and_fallback(results["pass"])
+    test_held_out_bundles_and_attribution()
+    print("\n" + "=" * 60)
+    print("ALL STREAMLIT APP UNIT TESTS PASSED SUCCESSFULLY!")
+    print("=" * 60)
